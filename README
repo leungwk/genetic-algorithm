@@ -1,0 +1,9 @@
+Ensure the following directories are on the classpath
+
+~/src/euler/src/ # provide euler and subnamespaces
+~/src/euler/test/ # provide euler tests
+~/src/common/clojure/ # provide common and subnamespaces
+
+
+
+The two projects should be stand-alone-able
