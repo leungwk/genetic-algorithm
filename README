@@ -6,6 +6,4 @@ Ensure the following directories are on the classpath
 
 
 
-The two projects should be stand-alone-able
-
-Note, this file will change, soon.
+Local dependicies go into lib/
