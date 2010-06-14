@@ -1,4 +1,4 @@
-(defproject prac "0.0.1"
+(defproject prac "0.1.0"
   :description "For practicing programming"
   :dependencies [[incanter/incanter-core "1.2.3-SNAPSHOT"]
                  [incanter/incanter-core "1.2.3-SNAPSHOT"]

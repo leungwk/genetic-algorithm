@@ -7,3 +7,7 @@ Ensure the following directories are on the classpath
 
 
 Local dependicies go into lib/
+
+
+
+This project is used for practicing and engraining good programming habits, such as writing unit tests, using a profiler (jvisualvm), doing revision control, using a debugger ()

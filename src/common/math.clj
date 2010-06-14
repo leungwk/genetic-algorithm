@@ -78,3 +78,9 @@
 ;;   (let [bits (inc (.bitLength bign))
 ;;         bigr (BigInteger. bits rnd)]
 ;;     (-> bign (.multiply bigr) (.shiftRight bits))))
+
+(defn pythagorean-triplet?
+  [a b c]
+  {:pre [(pos? a), (pos? b), (pos? c)]}
+  (= (+ (* a a) (* b b))
+     (* c c)))
