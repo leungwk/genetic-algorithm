@@ -84,3 +84,27 @@
   {:pre [(pos? a), (pos? b), (pos? c)]}
   (= (+ (* a a) (* b b))
      (* c c)))
+
+(defn roulette-wheel
+  "Perform a roulette wheel selection given a list of frequencies"
+  [freqs]
+  (let [nfreqs (count freqs)
+        tot (reduce + freqs)
+        dist (map #(double (/ % tot)) freqs)
+        rval (double (rand))]
+    (loop [acc 0, i 0]
+      (let [lb acc, ub (+ acc (nth dist i))]
+        (cond (>= (+ i 1) nfreqs) i
+              (and (>= rval lb) (< rval ub)) i
+              :else (recur ub (+ i 1)))))))
+
+(defn select-k-no-replacement-with-probability
+  "Select num objects from coll with no replacement each with a given probability (expressed as a frequency count)"
+  [num coll freqs]
+  (last (nth (iterate (fn [[rcoll rfreqs acc]]
+                   (let [widx (roulette-wheel rfreqs)]
+                     [(concat (take widx rcoll)  (drop (+ widx 1) rcoll))
+                      (concat (take widx rfreqs) (drop (+ widx 1) rfreqs))
+                      (cons (nth rcoll widx) acc)]))
+                 [coll freqs ()])
+            num)))
