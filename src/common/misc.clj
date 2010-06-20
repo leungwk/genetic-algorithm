@@ -22,14 +22,6 @@
        true)
    (catch ClassNotFoundException e false)))
 
-;; (defn palindromic? [num]
-;;   (let [numstr (str num), len (count numstr)]
-;;     (loop [low 0, high (- len 1)]
-;;       (cond (<= (- high low) 0) true
-;;             (not (= (nth numstr low) (nth numstr high))) false
-;;             :else (recur (+ low 1) (- high 1))))))
-
-;(defn palindromic-2? [num]
 (defn palindrome? [num]
   (let [s (seq (str num))]
     (= s (reverse s))))
@@ -39,3 +31,38 @@
 ex. (make-palindrome 'string') => 'gnirtsstring'"
   [s]
   (reduce str (concat (reduce str (reverse s)) s)))
+
+(defn take-to-first
+  "Returns a lazy sequence of successive items from coll up to
+  and including the point at which it (pred item) returns true.
+  pred must be free of side-effects.
+
+  src: http://www.mail-archive.com/clojure@googlegroups.com/msg25706.html"
+  [pred coll]
+  (lazy-seq
+   (when-let [s (seq coll)]
+     (if-not (pred (first s))
+       (cons (first s) (take-to-first pred (rest s)))
+       (list (first s))))))
+
+(defn take-including
+  "Returns a lazy sequence of successive items from coll up to and
+  including the point at which it (pred item) returns false.
+  pred must be free of side-effects.
+
+  aka. take-while-inclusive"
+  [pred coll]
+  (take-to-first #(not (pred %)) coll))
+
+(defn unzip
+  "Mimic the behaviour of Python's zip(*coll)
+
+  (unzip '([3 4 5] [3 4 5] [3 4 5]))  =>  ((3 3 3) (4 4 4) (5 5 5))
+  (unzip '((\"x\" 1) (\"y\" 2) (\"z\" 3 3.0)))  =>  ((\"x\" \"y\" \"z\") (1 2 3))
+  (unzip '((\"x\" 1 1.0) (\"y\" 2) (\"z\" 3 3.0)))  =>  ((\"x\" \"y\" \"z\") (1 2 3))"
+  [coll]
+  (loop [lst coll, acc ()]
+    (if (some empty? lst)
+      acc
+      (recur (map rest lst)
+             (concat acc (list (map first lst)))))))
