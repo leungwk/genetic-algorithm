@@ -1,13 +1,14 @@
 (defproject prac "0.1.0"
-  :description "For practicing programming"
-  :dependencies [[incanter/incanter-core "1.2.3-SNAPSHOT"]
+  :description "For programming practice"
+  :dependencies [;[incanter/incanter-core "1.2.3-SNAPSHOT"]
                  [incanter/incanter-core "1.2.3-SNAPSHOT"]
-                 [incanter/incanter-io "1.2.3-SNAPSHOT"]
+                 ;[incanter/incanter-io "1.2.3-SNAPSHOT"]
                  [incanter/incanter-charts "1.2.3-SNAPSHOT"]
-                 [incanter/incanter-processing "1.2.3-SNAPSHOT"]
-                 [incanter/incanter-mongodb "1.2.3-SNAPSHOT"]
-                 [incanter/incanter-pdf "1.2.3-SNAPSHOT"]
-                 [incanter/incanter-latex "1.2.3-SNAPSHOT"]
+                 ;[incanter/incanter-processing "1.2.3-SNAPSHOT"]
+                 ;[incanter/incanter-mongodb "1.2.3-SNAPSHOT"]
+                 ;[incanter/incanter-pdf "1.2.3-SNAPSHOT"]
+                 ;[incanter/incanter-latex "1.2.3-SNAPSHOT"]
+                 ;[incanter/incanter-distributions "1.2.3-SNAPSHOT"]
                  [criterium "0.0.1-SNAPSHOT"]]
 ;                 [mathCollection "mathCollection"]]
 ;  :dependencies [[org.clojure/clojure "1.1.0"]

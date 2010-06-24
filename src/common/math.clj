@@ -1,5 +1,6 @@
 (ns common.math
   (:use (incanter core stats charts))
+  (:require [clojure.contrib.probabilities.finite-distributions :as finite-distributions])
   (:require clojure.contrib.math))
 
 ;; from http://clojure-euler.wikispaces.com/The+Optimal+Toolkit
@@ -97,6 +98,9 @@
         (cond (>= (+ i 1) nfreqs) i
               (and (>= rval lb) (< rval ub)) i
               :else (recur ub (+ i 1)))))))
+
+(defn count-words [coll] ;; from http://www.citerus.se/kunskap/pnehm/pnehmartiklar/fromjavatoclojure.5.1fe8f33123572b59ab800023092.html
+  (reduce #(merge-with + %1 {%2 1}) {} coll))
 
 (defn select-k-no-replacement-with-probability
   "Select num objects from coll with no replacement each with a given probability (expressed as a frequency count)"
