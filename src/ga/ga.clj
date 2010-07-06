@@ -8,7 +8,7 @@
   (:use incanter.core)
   (:use [incanter.distributions :exclude (roulette-wheel)]))
 
-(def *euler-11-grid-ga*
+(def *unimodal-grid*
      (matrix [
  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
  1  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  1
@@ -52,9 +52,9 @@
  1  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  5  1
  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
 ] 41))
-; (euler-11-func-coord-dir 4 *euler-11-grid-ga*)
+; (euler-11-func-coord-dir 4 *unimodal-grid*)
 ; ==> ({:dir se, :prod 8.041275E7, :coord [18 18]} ...
-; (conseq-values 4 'se [18 18] *euler-11-grid-ga*)
+; (conseq-values 4 'se [18 18] *unimodal-grid*)
 ; ==> (90.0 95.0 99.0 95.0) ; prod = 8.041275E7
 ; so there is more than one optimal here
 
@@ -78,6 +78,11 @@
   1  1  1  1  2  2  3  3  3  3  2  2  1  1  1  1
 ] 16))
 
+(defn select-reproducers-3 [nrep pop]
+  (let [minfit (reduce min (map #(:fitness %) pop))]
+    (cond (> nrep (count pop)) (throw (new Exception "k exceeds coll size"))
+          :else (draw-nr nrep pop (map #(+ minfit 1 (:fitness %)) pop)))))
+
 (defn select-reproducers-1 [nrep pop]
   (let [[pop0 popr] (separate #(<= (:fitness %) 0) pop) ; pos
         npop (count pop)
@@ -100,67 +105,35 @@
           (<= diff 0) (draw-nr nrep popr poprf)
           :else (concat popr (draw-nr diff pop0 (repeat npop0 1))))))
 
-;(defstruct chromosome :fitness :orig :dir)
-(defstruct chromosome-2 :fitness :bits)
-(defn make-gene [gs opts]
-  (let [gsks (keys (dissoc (into {} (struct-map gs)) :fitness))]
-    (select-keys opts gsks)))
+;; (defn mutate-2
+;;   [chro]
+;;   (reduce merge
+;;           (map (fn [k]
+;;                  {k ((fn draw-val [d]
+;;                        (if (vector? d)
+;;                          (map draw-val d)
+;;                          (draw d)))
+;;                      (k chro))})
+;;                (keys chro))))
 
-(defn one-point-crossover
-  [g1 g2] ;; assume for now individuals have same structure
-  (let [gnf (dissoc (into {} g1) :fitness) ; does not change g1 if :fitness key not present
-        gnfks (keys gnf)
-        ;; partition
-        g1p1 (select-keys g1 (take 1 gnfks))
-        g1p2 (select-keys g1 (drop 1 gnfks))
-        g2p1 (select-keys g2 (take 1 gnfks))
-        g2p2 (select-keys g2 (drop 1 gnfks))
-        ;; children
-        c1 (merge g1p1 g2p2)
-        c2 (merge g2p1 g1p2)]
-    (list c1 c2)))
-
-(defn two-point-crossover
-  [g1 g2] ;; assume for now individuals have same structure
-  (let [gnf (dissoc (into {} g1) :fitness) ; does not change g1 if :fitness key not present
-        gnfks (keys gnf)
-        ;; partition
-        g1p1 (select-keys g1 (take 1 gnfks))
-        g1p2 (select-keys g1 (take 1 (drop 1 gnfks)))
-        g1p3 (select-keys g1 (drop 2 gnfks))
-        g2p1 (select-keys g2 (take 1 gnfks))
-        g2p2 (select-keys g2 (take 1 (drop 1 gnfks)))
-        g2p3 (select-keys g2 (drop 2 gnfks))
-        ;; children
-        c1 (merge g1p1 g2p2 g1p3)
-        c2 (merge g2p1 g1p2 g2p3)]
-    (list c1 c2)))
-
-(defn average-fitness
-  "Calculate the average fitness of the population"
-  [pop]
-  (incanter.stats/mean (map #(:fitness %) pop)))
-
-(defn grid-product [{num :num, dir :dir, orig :orig, grid :grid}] ; ignore any additional entries in input if present
-  (reduce * (conseq-values num dir orig grid)))
-;; TODO allow both
-;; (grid-fitness {:num 4 :dir 'se :orig [18 18] :grid *euler-11-grid-ga*})
-;; (grid-fitness :num 4 :dir 'se :orig [18 18] :grid *euler-11-grid-ga*)
-
-
-(defn grid-sum-threshold [{num :num, dir :dir, thresh :thresh, orig :orig, grid :grid}] ; sum num values from orig in dir on grid if each num <= thresh, otherwise return 0
-  (when-let [vals (conseq-values num dir orig grid)]
-    (if (every? #(<= % thresh) vals)
-      (reduce + vals)
-      0)))
-
-(defn prime-bits [{bits :bits}]
-  (let [nb (count bits)]
-    (reduce + (map (fn [idx]
-                     (if (prime? idx)
-                       (if (= 1 (nth bits idx)) nb (- nb)) ; big difference if reward > 1?
-                       (if (= 0 (nth bits idx)) nb (- nb)))) ; big difference if 1,-1 or 0,-1 (ie. whether we want exact strings, or trying to find primes)
-                   (range nb)))))
+(defn one-point-crossover [g1 g2] ; assume for now individuals have same structure
+  (let [gnf (dissoc (into {} g1) :fitness)
+        ks (keys gnf)]
+    (map #(reduce merge %)
+         (unzip
+          (map (fn [k]
+                 (let [v1 (k g1)
+                       v2 (k g2)]
+                   (if-not (vector? v1)
+                     (list {k v2} {k v1})
+                     (let [cp (rand-int (count v1)) ; todo: generalize (or specify the crossover function in `ga'
+                           v1p1 (take cp v1)
+                           v1p2 (drop cp v1)
+                           v2p1 (take cp v2)
+                           v2p2 (drop cp v2)]
+                       (list {k (vec (concat v1p1 v2p2))}
+                             {k (vec (concat v2p1 v1p2))})))))
+               ks)))))
 
 (defn binary-to-decimal [bits idx]
   "Convert a binary sequence to decimal, starting at 2^idx"
@@ -169,39 +142,18 @@
                    bits
                    (range idx (- idx nb) -1)))))
 
-(defstruct chromosome-3 :fitness :bits-x1 :bits-x2)
-(defn rastrigin [{bx1 :bits-x1, bx2 :bits-x2}]
-  (let [x1 (binary-to-decimal bx1 2)
-        x2 (binary-to-decimal bx2 2)]   ; todo: get rid of magic number
-    (+ 20 (* x1 x1) (* x2 x2) (* -10 (+ (Math/cos (* 2 Math/PI x1))
-                                        (Math/cos (* 2 Math/PI x2)))))))
-
-(defn select-from-sample-spaces ; the `mutate' function
-  "map (or structure) of sample spaces to select one value from (assume uniform for now). Preserves the existing mapping structure."
-  [sss]
-  (reduce merge
-          (map (fn [k]
-                 (let [ss (k sss)]
-                   {k (if (vector? ss) ; TODO deal with nested structures better (OR split up coordinates)
-                        (vec (map (fn [el] (draw el)) ss))
-                        (draw ss))}))
-               (keys sss))))
-
-(defstruct chromosome :ss :dist :vals)
 (defn mutate-2
   [chro]
-  (let [ss (:ss chro)
-        dist (:dist chro)]
-    (reduce merge (map ;#(hash-map % (nth (% ss) (draw (% dist)))) ; does not work because (% dist) might be a vector of distributions
-                   (fn [k]
-                     {k ((fn draw-val [d s]
-                           (if (vector? d)
-                             (map draw-val d s)
-                             (nth s (draw d))))
-                         (k dist) (k ss))})
-                   (keys ss)))))
+  (reduce merge
+          (map (fn [k]
+                 {k ((fn draw-val [d]
+                       (if (vector? d)
+                         (map draw-val d)
+                         (draw d)))
+                     (k chro))})
+               (keys chro))))
 
-(defn ga-2 [& options]
+(defn ga [& options]
   (let [opts (when options (apply assoc {} options))
         numgen (or (:numgen opts) 10000)
         mrate (or (:mrate opts) 0.05)
@@ -217,9 +169,11 @@
           timestamp (.format (new java.text.SimpleDateFormat "yyyy-MM-dd'T'hhmmss'.'SSS") (new java.util.Date))
           fpath (str "log/q11_ga_" timestamp ".log")]
       (println "Logging to " fpath)
+      (println (str "(plot-ga \"" fpath "\")"))
       (loop [pop ipop, i 0, best {:fitness Double/NEGATIVE_INFINITY}]
         (if (>= i numgen)      
-          [best (sort-by :fitness > pop)]
+          {:best best
+           :curpop (sort-by :fitness > pop)}
           (let [reps (sr nrep pop)
                 gen-mutant #(if (< (rand) mrate) (list (gen-rand-individual)) ())
                 gen-children #(map (fn [x]
@@ -231,49 +185,15 @@
                                                               (gen-children))))
                 newpop (concat reps children)
                 fittest (first (sort-by :fitness > pop))]
-            (clojure.contrib.duck-streams/append-spit fpath (str i "," (average-fitness newpop) "\n"))
+            (clojure.contrib.duck-streams/append-spit
+             fpath
+             (str i "," (incanter.stats/mean (map #(:fitness %) newpop)) "\n"))
             (recur newpop
                    (+ i 1)
                    (if (> (:fitness fittest)
                           (:fitness best))
                      fittest
                      best))))))))
-
-;; pass in a sample space to mutate on
-(defn ga [numgen mrate gs sss ff ffops sr] ; use ffops for fitness function
-  (let [generate-random-gene #(let [ops (merge (select-from-sample-spaces sss)
-                                               ffops)]
-                                  (swank.core/break)
-                                (assoc (make-gene gs ops)
-                                  :fitness (ff ops)))
-        ipop (repeatedly 20 #(generate-random-gene))
-        timestamp (.format (new java.text.SimpleDateFormat "yyyy-MM-dd'T'hhmmss'.'SSS") (new java.util.Date))
-        fpath (str "log/q11_ga_" timestamp ".log")]
-    (println "Logging to " fpath)
-    (loop [pop ipop, i 0, best {:fitness Double/NEGATIVE_INFINITY}]
-      (if (= i numgen)
-        [best (sort-by :fitness > pop)]
-        (let [nrep 10
-              reps (sr nrep pop)
-              generate-mutant #(if (< (rand) mrate)
-                                 (list (generate-random-gene))
-                                 ())
-              generate-children #(map (fn [x]
-                                        (assoc x :fitness (ff (merge x ffops))))
-                                      (let [[p1 p2] (vec (draw-nr 2 reps (repeat nrep 1)))]
-                                        (one-point-crossover p1 p2)))
-              children (reduce concat
-                               (repeatedly 5 #(concat (generate-mutant)
-                                                      (generate-children))))
-              newpop (concat reps children)
-              fittest (first (sort-by :fitness > pop))]
-          (clojure.contrib.duck-streams/append-spit fpath (str i "," (average-fitness newpop) "\n"))
-          (recur newpop
-                 (+ i 1)
-                 (if (> (:fitness fittest)
-                        (:fitness best))
-                   fittest
-                   best)))))))
 
 (defn plot-ga
   [fname]
@@ -285,110 +205,44 @@
      (incanter.charts/line-chart
       (first res) (last res)))))
 
-(comment
-
-  (let [g *euler-11-grid-ga*
-        [nrow ncol] (dim g)]
-    (ga 5000
-        0.01
-        chromosome        
-        {:dir *dirs*,
-         :orig [(range nrow) (range ncol)]}
-        grid-product
-        {:num 4, :grid g}
-        select-reproducers-1))
-
-(let [[nrow ncol] (dim *euler-11-grid-ga*)
-      chro (struct-map chromosome
-             :ss {:dir *dirs*
-                  :orig [(range nrow) (range ncol)]} ; now that I think about this, this might be encoded poorly, and bits might be better
-             :dist {:dir (reduce merge (map #(hash-map % 1)
-                                            (range (count *dirs*)))) ; ie. uniform, and to allow (draw (k (:dist chro))) later
-                    :orig [(reduce merge (map #(hash-map % 1)
-                                              (range nrow)))
-                           (reduce merge (map #(hash-map % 1)
-                                              (range ncol)))]}
-             :vals {:dir nil, :orig nil})]
-  (ga-2 :numgen 2500
+(defstruct chro-grid :dir :orig)
+(defn ga-unimodal []
+  (let [[nrow ncol] (dim *unimodal-grid*)
+        chro (struct-map chro-grid
+               :dir (reduce merge (map #(hash-map % 1) *dirs*))
+               :orig [(reduce merge (map #(hash-map % 1)
+                                         (range nrow)))
+                      (reduce merge (map #(hash-map % 1)
+                                         (range ncol)))])]
+    (ga :numgen 2500
         :mrate 0.05
         :nipop 30
         :nrep 10
         :nchilds 5
         :chro chro
         :ff (fn grid-product-2 [map]
-              (reduce * (conseq-values 4 (:dir map) (:orig map) *euler-11-grid-ga*)))
-        :sr select-reproducers-1))
+              (reduce * (conseq-values 4 (:dir map) (:orig map) *unimodal-grid*)))
+        :sr select-reproducers-1)))
 
-(let [[nrow ncol] (dim *euler-11-grid-ga-2*)
-      chro (struct-map chromosome
-             :ss {:dir *dirs*
-                  :orig [(range nrow) (range ncol)]} ; now that I think about this, this might be encoded poorly, and bits might be better
-             :dist {:dir (reduce merge (map #(hash-map % 1)
-                                            (range (count *dirs*)))) ; ie. uniform, and to allow (draw (k (:dist chro))) later
-                    :orig [(reduce merge (map #(hash-map % 1)
-                                              (range nrow)))
-                           (reduce merge (map #(hash-map % 1)
-                                              (range ncol)))]}
-             :vals {:dir nil, :orig nil})]
-  (ga-2 :numgen 2500
-        :mrate 0.05
-        :nipop 30
+(defstruct chro-rastrigin :bits-x1 :bits-x2)
+(defn ga-rastrigin []
+  (let [nbits 9
+        max (Math/pow 2 nbits)
+        chro (struct-map chro-rastrigin
+               :bits-x1 (vec (map #(hash-map 0 (- max (bit-shift-left 1 %))
+                                             1 (- max (- max (bit-shift-left 1 %)))) (range nbits))) ; {0 max-(2^k), 1 max-(max-2^k)}
+               :bits-x2 (vec (map #(hash-map 0 (- max (bit-shift-left 1 %))
+                                             1 (- max (- max (bit-shift-left 1 %)))) (range nbits))))]
+    (ga :numgen 2500
+        :mrate 0.01
+        :nipop 10
         :nrep 10
         :nchilds 5
         :chro chro
-        :ff (fn grid-sum-threshold [map]
-              (when-let [vals (conseq-values 4 (:dir map) (:orig map) *euler-11-grid-ga-2*)]
-                (if (every? #(<= % 50) vals)
-                  (reduce + vals)
-                  0)))
-        :sr select-reproducers-1))
-
-  (let [g *euler-11-grid-ga-2*
-        [nrow ncol] (dim g)]
-    (ga 10000
-        0.05
-        chromosome        
-        {:dir *dirs*,
-         :orig [(range nrow) (range ncol)]}
-        grid-sum-threshold
-        {:num 4, :grid g, :thresh 50}
-        select-reproducers-1))
-
-  (ga 100
-      0.50
-      chromosome-2
-      {:bits (vec (repeat 64 [0 1]))}
-      prime-bits
-      {}
-      select-reproducers-1)
-
-;; (defstruct chromosome :fitness :ss :dist :vals)
-;; (struct-map chromosome
-;;   :fitness Double/NEGATIVE_INFINITY
-;;   :ss (repeat 8 [0 1])
-;;   :dist (map #(bit-shift-left 1 %) (range 8))
-;;   :vals (repeat 8 0))
-
-  ;; TODO fix
-  (ga 1000
-      0.05
-      chromosome-3
-      ;; too many lines, and it still requires an extra call to get the result
-      ;; {:bits (nth (iterate (fn [[i m]]
-      ;;                         [(inc i) (merge m {i (bit-shift-left 1 i)})])
-      ;;                      [0 {0 1}])
-      ;;             5)}
-
-      ;; 4 2 1 1/2 1/4 ...
-;      {:bits-x1 (reduce merge (map #(hash-map % (bit-shift-left 1 %)) (range 8)))
-;       :bits-x2 (reduce merge (map #(hash-map % (bit-shift-left 1 %)) (range 8)))}
-      (let [brv [0 1]  ; if not a map, implicitly assume uniform. If a map such as {0 1, 1 1} is provide, draw according to that distribution
-            nbits 8]
-        {:bits-x1 (map #(vector brv (bit-shift-left 1 %)) (range nbits))})
-      #(- (rastrigin %))
-      {}
-      select-reproducers-2)
-  
-
-
-  )
+        :ff (fn neg-rastrigin [{bx1 :bits-x1, bx2 :bits-x2}]
+              (let [x1 (binary-to-decimal bx1 2)
+                    x2 (binary-to-decimal bx2 2)]   ; todo: get rid of magic number
+                (- ; todo: allow choosing of max or min (currently max only)
+                 (+ 20 (* x1 x1) (* x2 x2) (* -10 (+ (Math/cos (* 2 Math/PI x1))
+                                                     (Math/cos (* 2 Math/PI x2))))))))
+        :sr select-reproducers-1)))
