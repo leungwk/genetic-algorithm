@@ -78,6 +78,61 @@
   1  1  1  1  2  2  3  3  3  3  2  2  1  1  1  1
 ] 16))
 
+(defmulti roulette-wheel-3 (fn
+                             ([x] [(class x)])
+                             ([x y] [(class x) (class y)])))
+(defmethod roulette-wheel-3 [java.util.Collection] [coll] (roulette-wheel-3 coll #(identity %)))
+(defmethod roulette-wheel-3 [java.util.Collection java.lang.Number] [coll key] (roulette-wheel-3 coll #(get % key)))
+(defmethod roulette-wheel-3 [java.util.Collection clojure.lang.AFn] [coll sf]
+           (let [tot (reduce + (map sf coll))]
+             (if (or (= tot 0)
+                     (empty? coll))
+               nil
+               (let [min (reduce min (map sf coll))
+                     rval (double (rand (+ min tot)))]
+                 (loop [acc 0, lst coll]
+                   (if (empty? lst)
+                     (last coll) ; in case lost precision does something weird
+                     (let [el (first lst), lb acc, ub (+ acc (sf el))]
+                       (if (and (>= rval lb) (< rval ub))
+                         el
+                         (recur ub (rest lst))))))))))
+
+;; an example of the uglyiness created without multiple dispatch
+;; (defn roulette-wheel-2
+;;   "Proportional selection on coll using value of key, or an index key. value assumed a list of frequencies"
+;;   ([coll] (roulette-wheel-2 coll nil))
+;;   ([coll key]
+;;      ;; if key is nil, expecting a sequence or set of numbers
+;;      (cond (empty? (first coll)) nil
+;;            (not (every? #(isa? (class (first coll)) %) coll)) (throw (new Exception "coll inhomogeneous; selectors incompatible"))
+;;            (or (and (empty? key)
+;;                     (not (isa? coll clojure.lang.Sequential))
+;;                     (not (isa? coll clojure.lang.PersistentHashSet)))
+;;                (not (isa? coll clojure.lang.APersistentMap)))
+;;            (throw (new Exception (str key " is not a valid selector for class " (class coll))))
+;;            :else (let [sf (cond (or (isa? coll clojure.lang.Sequential)
+;;                                     (isa? coll clojure.lang.PersistentHashSet))
+;;                                 #(identity %)
+;;                                 (isa? (first coll) clojure.lang.APersistentMap)
+;;                                 #(get coll key)
+;;                                 :else (throw (new Exception (str "Cannot handle class: " coll))))
+;;                        tot (reduce + (map sf coll))]
+;;                    (if (= 0 tot)
+;;                      nil
+;;                      (let [rval (double (rand))]
+;;                        (loop [acc 0, lst coll]
+;;                          (if (empty? lst)
+;;                            acc
+;;                            (let [lb acc, ub (+ acc (sf (first lst)))]
+                             
+;;                              ))
+
+;; )
+;; )
+;; )))))
+
+
 (defn select-reproducers-3 [nrep pop]
   (let [minfit (reduce min (map #(:fitness %) pop))]
     (cond (> nrep (count pop)) (throw (new Exception "k exceeds coll size"))
@@ -104,17 +159,6 @@
     (cond (> nrep npop) (throw (new Exception "k exceeds coll size"))
           (<= diff 0) (draw-nr nrep popr poprf)
           :else (concat popr (draw-nr diff pop0 (repeat npop0 1))))))
-
-;; (defn mutate-2
-;;   [chro]
-;;   (reduce merge
-;;           (map (fn [k]
-;;                  {k ((fn draw-val [d]
-;;                        (if (vector? d)
-;;                          (map draw-val d)
-;;                          (draw d)))
-;;                      (k chro))})
-;;                (keys chro))))
 
 (defn one-point-crossover [g1 g2] ; assume for now individuals have same structure
   (let [gnf (dissoc (into {} g1) :fitness)
@@ -222,7 +266,7 @@
         :chro chro
         :ff (fn grid-product-2 [map]
               (reduce * (conseq-values 4 (:dir map) (:orig map) *unimodal-grid*)))
-        :sr select-reproducers-1)))
+        :sr select-reproducers-3)))
 
 (defstruct chro-rastrigin :bits-x1 :bits-x2)
 (defn ga-rastrigin []
@@ -245,4 +289,4 @@
                 (- ; todo: allow choosing of max or min (currently max only)
                  (+ 20 (* x1 x1) (* x2 x2) (* -10 (+ (Math/cos (* 2 Math/PI x1))
                                                      (Math/cos (* 2 Math/PI x2))))))))
-        :sr select-reproducers-1)))
+        :sr select-reproducers-3)))
