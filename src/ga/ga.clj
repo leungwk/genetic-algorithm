@@ -1,11 +1,12 @@
 (ns ga.ga
   (:require [clojure.contrib.duck-streams :only (append-spit read-lines)])
   (:require [clojure.contrib.string :only (split)])
-  (:use [common.math :only (draw-nr prime? roulette-wheel)])
+  (:use [common.math :only (draw-nr prime?)])
   (:use [common.misc :only (unzip)])
   (:use [clojure.contrib.seq-utils :only (separate)])
   (:use common.grid)
   (:use incanter.core)
+  (:use clojure.set)
   (:use [incanter.distributions :exclude (roulette-wheel)]))
 
 (def *unimodal-grid*
@@ -78,64 +79,9 @@
   1  1  1  1  2  2  3  3  3  3  2  2  1  1  1  1
 ] 16))
 
-(defmulti roulette-wheel-3 (fn
-                             ([x] [(class x)])
-                             ([x y] [(class x) (class y)])))
-(defmethod roulette-wheel-3 [java.util.Collection] [coll] (roulette-wheel-3 coll #(identity %)))
-(defmethod roulette-wheel-3 [java.util.Collection java.lang.Number] [coll key] (roulette-wheel-3 coll #(get % key)))
-(defmethod roulette-wheel-3 [java.util.Collection clojure.lang.AFn] [coll sf]
-           (let [tot (reduce + (map sf coll))]
-             (if (or (= tot 0)
-                     (empty? coll))
-               nil
-               (let [min (reduce min (map sf coll))
-                     rval (double (rand (+ min tot)))]
-                 (loop [acc 0, lst coll]
-                   (if (empty? lst)
-                     (last coll) ; in case lost precision does something weird
-                     (let [el (first lst), lb acc, ub (+ acc (sf el))]
-                       (if (and (>= rval lb) (< rval ub))
-                         el
-                         (recur ub (rest lst))))))))))
-
-;; an example of the uglyiness created without multiple dispatch
-;; (defn roulette-wheel-2
-;;   "Proportional selection on coll using value of key, or an index key. value assumed a list of frequencies"
-;;   ([coll] (roulette-wheel-2 coll nil))
-;;   ([coll key]
-;;      ;; if key is nil, expecting a sequence or set of numbers
-;;      (cond (empty? (first coll)) nil
-;;            (not (every? #(isa? (class (first coll)) %) coll)) (throw (new Exception "coll inhomogeneous; selectors incompatible"))
-;;            (or (and (empty? key)
-;;                     (not (isa? coll clojure.lang.Sequential))
-;;                     (not (isa? coll clojure.lang.PersistentHashSet)))
-;;                (not (isa? coll clojure.lang.APersistentMap)))
-;;            (throw (new Exception (str key " is not a valid selector for class " (class coll))))
-;;            :else (let [sf (cond (or (isa? coll clojure.lang.Sequential)
-;;                                     (isa? coll clojure.lang.PersistentHashSet))
-;;                                 #(identity %)
-;;                                 (isa? (first coll) clojure.lang.APersistentMap)
-;;                                 #(get coll key)
-;;                                 :else (throw (new Exception (str "Cannot handle class: " coll))))
-;;                        tot (reduce + (map sf coll))]
-;;                    (if (= 0 tot)
-;;                      nil
-;;                      (let [rval (double (rand))]
-;;                        (loop [acc 0, lst coll]
-;;                          (if (empty? lst)
-;;                            acc
-;;                            (let [lb acc, ub (+ acc (sf (first lst)))]
-                             
-;;                              ))
-
-;; )
-;; )
-;; )))))
-
-
 (defn select-reproducers-3 [nrep pop]
   (let [minfit (reduce min (map #(:fitness %) pop))]
-    (cond (> nrep (count pop)) (throw (new Exception "k exceeds coll size"))
+    (cond (> nrep (count pop)) pop
           :else (draw-nr nrep pop (map #(+ minfit 1 (:fitness %)) pop)))))
 
 (defn select-reproducers-1 [nrep pop]
@@ -207,32 +153,42 @@
         chro (if (:chro opts) (:chro opts) (throw (new Exception "Unspecified chromosome")))
         ff (if (:ff opts) (:ff opts) (throw (new Exception "Unspecified fitness function")))
         sr (if (:sr opts) (:sr opts) (throw (new Exception "Unspecified select reproducers function")))]
-    (let [gen-rand-individual #(let [wc (mutate-2 chro)]
-                                 (assoc wc :fitness (ff wc)))
-          ipop (repeatedly nipop #(gen-rand-individual))
+    (let [gen-rand-indiv #(let [wc (mutate-2 chro)]
+                            (assoc wc :fitness (ff wc)))
+          gen-init-pop (fn [] (repeatedly nipop #(gen-rand-indiv)))
+          ipop (gen-init-pop)
+          popquota (+ nrep (* nchilds 2))
           timestamp (.format (new java.text.SimpleDateFormat "yyyy-MM-dd'T'hhmmss'.'SSS") (new java.util.Date))
           fpath (str "log/q11_ga_" timestamp ".log")]
       (println "Logging to " fpath)
       (println (str "(plot-ga \"" fpath "\")"))
-      (loop [pop ipop, i 0, best {:fitness Double/NEGATIVE_INFINITY}]
-        (if (>= i numgen)      
+      (loop [pop ipop, i 0, best (first (sort-by :fitness > ipop))]
+          (swank.core/break)
+        (if (>= i numgen)
           {:best best
            :curpop (sort-by :fitness > pop)}
           (let [reps (sr nrep pop)
-                gen-mutant #(if (< (rand) mrate) (list (gen-rand-individual)) ())
                 gen-children #(map (fn [x]
                                      (assoc x :fitness (ff x)))
-                                   (let [[p1 p2] (vec (draw-nr 2 reps (repeat nrep 1)))]
-                                     (one-point-crossover p1 p2))) ; todo: pass in the chromosome and have it operate at that level
-                children (reduce concat
-                                 (repeatedly nchilds #(concat (gen-mutant)
-                                                              (gen-children))))
-                newpop (concat reps children)
-                fittest (first (sort-by :fitness > pop))]
+                                   (let [[p1 p2]
+                                         (vec (draw-nr 2 reps (repeat nrep 1)))]
+                                     (one-point-crossover p1 p2)))
+                gen-mutant #(if (< (rand) mrate) (list (gen-rand-indiv)) ())
+                gen-spawn #(concat (gen-mutant) (gen-children)) ; returns 2 or 3
+                children (reduce concat (repeatedly nchilds gen-spawn))
+                tmppop (set (concat reps children)) ; enforces diversity
+                newpop (loop [i 0, acc tmppop]
+                         (let [diff (- popquota (count acc))]
+                           (if (or (<= diff 0) (>= i 1000)) ; arbitrary (though could optimize base on mrate)
+                             acc
+                             (recur (+ i 1) (union (set (gen-spawn)) acc)))))
+                fittest (first (sort-by :fitness > newpop))]
             (clojure.contrib.duck-streams/append-spit
              fpath
              (str i "," (incanter.stats/mean (map #(:fitness %) newpop)) "\n"))
-            (recur newpop
+            (recur (if (<= (count newpop) 2) ; restart if population too low (although a more intelligent restart would be good)
+                     (gen-init-pop)
+                     newpop)
                    (+ i 1)
                    (if (> (:fitness fittest)
                           (:fitness best))

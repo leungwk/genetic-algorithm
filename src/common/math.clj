@@ -2,7 +2,8 @@
   (:use (incanter core stats charts))
   (:require [clojure.contrib.probabilities.finite-distributions :as finite-distributions])
   (:require clojure.contrib.math)
-  (:use [clojure.contrib.seq-utils :only (positions)]))
+  (:use [clojure.contrib.seq-utils :only (positions)])
+  (:use [common.misc :only (unzip)]))
 
 ;; from http://clojure-euler.wikispaces.com/The+Optimal+Toolkit
 (defn divisible?
@@ -87,8 +88,8 @@
   (= (+ (* a a) (* b b))
      (* c c)))
 
-(defn roulette-wheel
-  "Perform a roulette wheel selection given a list of frequencies"
+(defn roulette-wheel-idx
+  "Proportionally select from freqs. Returns an index."
   [freqs]
   (let [nfreqs (count freqs)
         tot (reduce + freqs)]
@@ -121,19 +122,69 @@
                (if (pred el) (concat acc (list i)) acc)
                (+ i 1))))))
 
-(defn draw-nr
-  "Select num objects from coll with no replacement each with a given probability (expressed as a frequency count). throw an error if size of coll and freqs do not match, or if k exceeds coll size."
-  [num coll freqs]
-  (cond (not (= (count coll) (count freqs))) (throw (new Exception "coll and freqs sizes not equal"))
-        (> num (count coll)) (throw (new Exception "k exceeds coll size"))
-        :else         
-        (let [poss (positions #(not (= 0 %)) freqs)
-              wfreqs (nths freqs poss)
-              wcoll (nths coll poss)]
-          (last (nth (iterate (fn [[rcoll rfreqs acc]]
-                                (let [widx (roulette-wheel rfreqs)]
-                                  [(concat (take widx rcoll)  (drop (+ widx 1) rcoll))
-                                   (concat (take widx rfreqs) (drop (+ widx 1) rfreqs))
-                                   (cons (nth rcoll widx) acc)]))
-                              [wcoll wfreqs ()])
-                     num)))))
+(defmulti roulette-wheel (fn
+                             ([x] [(class x)])
+                             ([x y] [(class x) (class y)])))
+(defmethod roulette-wheel [java.util.Collection] [coll] (roulette-wheel coll #(identity %)))
+(defmethod roulette-wheel [java.util.Collection clojure.lang.Sequential] [coll freqs]
+           (if (not (= (count coll) (count freqs)))
+             (throw (new Exception "coll and freqs sizes not equal"))
+             (let [tot (reduce + freqs)]
+               (if (or (= tot 0)
+                       (empty? coll))
+                 nil
+                 (let [small (reduce min freqs)
+                       rval (double (rand (+ (min 0 small) tot))) ; `(min 0 small)' otherwise the dist shifts disproportionally r = \frac{x}{\sum x} --> \frac{x+d}{\sum (x+d)} = \frac{x+d}{nd +\sum x}
+                       seqcoll (seq coll)]
+                   (loop [acc 0, lst seqcoll, lstfreq freqs]
+                     (if (empty? lst)
+                       (last seqcoll) ; in case lost precision does something weird
+                       (let [el (first lst), lb acc, ub (+ acc (first lstfreq))]
+                         (if (and (>= rval lb) (< rval ub))
+                           el
+                           (recur ub (rest lst) (rest lstfreq)))))))))))
+(defmethod roulette-wheel [java.util.Collection java.lang.Number] [coll key] (roulette-wheel coll #(get % key)))
+(defmethod roulette-wheel [java.util.Collection clojure.lang.AFn] [coll sf]
+           (let [tot (reduce + (map sf coll))]
+             (if (or (= tot 0)
+                     (empty? coll))
+               nil
+               (let [small (reduce min (map sf coll))
+                     rval (double (rand (+ (min 0 small) tot)))]
+                 (loop [acc 0, lst coll]
+                   (if (empty? lst)
+                     (last coll) ; in case lost precision does something weird
+                     (let [el (first lst), lb acc, ub (+ acc (sf el))]
+                       (if (and (>= rval lb) (< rval ub))
+                         el
+                         (recur ub (rest lst))))))))))
+
+(defmulti draw-nr (fn
+                      ([n x] [(class n) (class x)])
+                      ([n x y] [(class n) (class x) (class y)])))
+(defmethod draw-nr [java.lang.Integer java.util.Collection] [num coll] (draw-nr num coll (fn [x] 1)))
+(defmethod draw-nr [java.lang.Integer java.util.Collection clojure.lang.Sequential] [num coll freqs]
+           (cond (not (= (count coll) (count freqs))) (throw (new Exception "coll and freqs sizes not equal"))
+                 (> num (count coll)) (throw (new Exception "k exceeds coll size"))
+                 :else
+                 (loop [rlst (seq coll), acc (), lstfreqs freqs]
+                   (if (>= (count acc) num)
+                     (if (isa? (class coll) clojure.lang.PersistentHashSet)
+                       (set acc)
+                       acc)
+                     (let [widx (roulette-wheel-idx lstfreqs)]
+                       (recur (concat (take widx rlst) (drop (+ widx 1) rlst))
+                              (cons (nth rlst widx) acc)
+                              (concat (take widx lstfreqs) (drop (+ widx 1) lstfreqs))))))))
+(defmethod draw-nr [java.lang.Integer java.util.Collection clojure.lang.AFn] [num coll sf]
+           (cond (> num (count coll)) (throw (new Exception "k exceeds coll size"))
+                 :else
+                 (loop [rlst (seq coll), acc ()]
+                   (if (>= (count acc) num)
+                     (if (isa? (class coll) clojure.lang.PersistentHashSet)
+                       (set acc)
+                       acc)
+                     (let [freqs (map sf rlst)
+                           widx (roulette-wheel-idx freqs)]
+                       (recur (concat (take widx rlst) (drop (+ widx 1) rlst))
+                              (cons (nth rlst widx) acc)))))))
