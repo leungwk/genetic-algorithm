@@ -1,4 +1,5 @@
 (ns common.math
+  (:use [incanter.core :exclude (euclidean-distance)])
   (:use (incanter core stats charts))
   (:require [clojure.contrib.probabilities.finite-distributions :as finite-distributions])
   (:require clojure.contrib.math)
@@ -188,3 +189,13 @@
                            widx (roulette-wheel-idx freqs)]
                        (recur (concat (take widx rlst) (drop (+ widx 1) rlst))
                               (cons (nth rlst widx) acc)))))))
+
+(defn average-euclidean-distance
+  "Compute the pairwise distance between vectors vi and vj in coll"
+  [coll]
+  (let [ef (fn [vi vj]
+             (Math/sqrt (reduce + (map #(Math/pow (- %1 %2) 2) vi vj))))]
+    (incanter.stats/mean (map (fn [vi]
+                                (reduce + (map (fn [vj]
+                                                 (ef vi vj)) coll)))
+                              coll))))

@@ -1,14 +1,15 @@
 (ns ga.ga
   (:require [clojure.contrib.duck-streams :only (append-spit read-lines)])
   (:require [clojure.contrib.string :only (split)])
-  (:use [common.math :only (draw-nr prime?)])
+  (:use [common.math :only (draw-nr prime? average-euclidean-distance)])
   (:use [common.misc :only (unzip)])
   (:use [clojure.contrib.seq-utils :only (separate)])
   (:use common.grid)
-  (:use incanter.core)
   (:use criterium.core) ; for benchmarking
   (:use clojure.set)
-  (:use [incanter.distributions :exclude (roulette-wheel)]))
+  (:use incanter.core)
+  (:use [incanter.distributions :exclude (roulette-wheel)])
+  (:use [incanter.io :only (read-dataset)]))
 
 (def *unimodal-grid*
      (matrix [
@@ -197,33 +198,11 @@
              (map (fn [lm] (reduce #(merge-with + %1 %2) lm))
                   (unzip (cons ss (map #(f1 ck %) pop)))))
         f3 (fn [ck] ; create new chromosome slot
-             (let [ss (map #(reduce merge (map (fn [x] {x 0}) %)) ; todo: replace with a minimal value of some sort
+             (let [ss (map #(reduce merge (map (fn [x] {x Float/MIN_VALUE}) %)) ; todo: replace with a minimal, non-zero value based on type
                            (map #(keys %)
                                 (ck chro)))]
                {ck (vec (f2 ck pop ss))}))]
     (reduce merge (map f3 (keys chro)))))
-
-;; this is very confusing, I think, because of too much nesting
-  ;; (map (fn [ck]
-  ;;        (map (fn [indiv]
-  ;;               (map (fn [els]
-  ;;                      (reduce merge (map (fn [el] {el (:fitness indiv)})
-  ;;                                         els)))
-  ;;                    (ck indiv)))
-  ;;             pop))
-  ;;      (keys chro)))
-
-;; "d: p --> [0,1] \\in \\mathbb{R}
-;;  d(p) = 0 means no diversity
-;;  d(p) = 1 means every individual unique"
-;; won't do, because equality doesn't handle spreads
-(defn diversity-euclidean ; average distance between individuals
-  [chro pop] ; assume all keys are bit vectors
-  (let [ef (fn [a b]
-             
-)])
-  (map (fn [ks] ) (keys chro)))
-
 
 (defn ga [& options]                    ; uses sets for everything
   (let [opts (when options (apply assoc {} options))
@@ -235,26 +214,33 @@
         nrep (or (:nrep opts) 10)
         nchilds (or (:nchilds opts) 5)
         ichro (if (:ichro opts) (:ichro opts) (throw (new Exception "Unspecified initialization chromosome")))
-        mchro (if (:mchro opts) (:mchro opts) (throw (new Exception "Unspecified mutation chromosome")))
         ff (if (:ff opts) (:ff opts) (throw (new Exception "Unspecified fitness function")))
+        df (if (:df opts) (:df opts) (throw (new Exception "Unspecified diversity function")))
         srf (if (:srf opts) (:srf opts) (throw (new Exception "Unspecified select reproducers function")))
         bsf (if (:bsf opts) (:bsf opts) (throw (new Exception "Unspecified best sorting function")))
         mf (if (:mf opts) (:mf opts) (throw (new Exception "Unspecified mutate function")))
         cf (if (:cf opts) (:cf opts) (throw (new Exception "Unspecified crossover function")))]
                     
     (let [assoc-fitness (fn [x]
-                        (assoc x :fitness (ff x)))
-          gen-rand-indiv #(assoc-fitness (mf ichro))
-          gen-mutant #(assoc-fitness (mf mchro %))
-          gen-init-pop (fn [num] (set (repeatedly num #(gen-rand-indiv))))
+                          (assoc x :fitness (ff x)))
+          gen-rand-indiv #(assoc-fitness (mf %))
+          gen-mutant #(assoc-fitness (mf %))
+          gen-init-pop (fn [num] (set (repeatedly num #(gen-rand-indiv ichro))))
           ipop (gen-init-pop nipop)
           popquota (+ nrep (* nchilds 2))
           timestamp (.format (new java.text.SimpleDateFormat "yyyy-MM-dd'T'hhmmss'.'SSS") (new java.util.Date))
           fpath (str "log/q11_ga_" timestamp ".log")]
                                         ;      (println "Logging to " fpath)
       (println (str "(plot-ga \"" fpath "\")"))
-      (loop [pop ipop, i 0, best (take nbest (sort-by :fitness bsf ipop))]
-        (if (>= i numgen)
+      (clojure.contrib.duck-streams/append-spit
+       fpath
+       (str "gen" ","
+            "avgfit" ","
+            "diversity"
+            "\n"))
+
+      (loop [pop ipop, i 1, chro ichro, best (take nbest (sort-by :fitness bsf ipop))]
+        (if (> i numgen)
           {:numgen numgen
            :mp mp
            :cp cp
@@ -262,8 +248,7 @@
            :nbest nbest
            :nrep nrep
            :nchilds nchilds
-           :ichro ichro
-           :mchro mchro
+           :ichro chro ; final chro
 
            :best best
            :curpop (sort-by :fitness bsf pop)}
@@ -275,7 +260,7 @@
                                           (vec (draw-nr 2 re (repeat nre 1)))] ; adjust selection method of parents
                                       (cf p1 p2))))
                 mutant-fn #(if (< (rand) mp)
-                             #{(gen-mutant (draw reps))}
+                             #{(gen-mutant chro)}
                              #{})
                 children-fn #(if (< (rand) cp)
                                (gen-children reps)
@@ -284,57 +269,64 @@
                 mutant (mutant-fn)
                 gen-spawn #(union (mutant-fn) (children-fn)) ; use a different method to select spawn? (ie. something not quite total uniqueness (ie. sets), but also not quite no checking (ie. lists)). In Luke's book (30), this is Join(P,Breed(P))
                 tmppop (union reps children mutant)
-                newpop (loop [i 0, acc tmppop]
+                newpop (loop [j 0, acc tmppop]
                          (let [diff (- popquota (count acc))]
                                         ;(swank.core/break)
                            (if (or (<= diff 0) (>= i 1000)) ; arbitrary (though could optimize based on mp)
                              acc
-                             (recur (+ i 1) (union (gen-spawn) acc)))))]
+                             (recur (+ j 1) (union (gen-spawn) acc)))))
+
+                wchro (redist-chro chro newpop)
+                diversity (df wchro newpop)
+;                _ (swank.core/break)
+
+]
             (clojure.contrib.duck-streams/append-spit
              fpath
-             (str i "," (incanter.stats/mean (map #(:fitness %) newpop)) "\n"))
+             (str i ","
+                  (incanter.stats/mean (map #(:fitness %) newpop)) ","
+                  diversity
+
+ "\n"))
                                         ;(println i)
             (recur (if (<= (count newpop) 2) ; restart if newpop too low; select using best solutions so far ; todo: parameterize
                      (union (gen-children (seq best))
                             (gen-init-pop 5)) ; todo: parameterize
                      newpop)
                    (+ i 1)
+                   wchro
                    (set (take nbest (sort-by :fitness bsf (union best newpop)))))))))))
-
-(comment
-"
-  (report-result (quick-bench (ga-unimodal))) ; no sets
-  Evaluation count             : 6
-  Execution time mean          : 25.454667 sec  95.0% CI: (25.452000 sec, 25.463333 sec)
-  Execution time std-deviation : 581.296484 ms  95.0% CI: (579.207735 ms, 586.476938 ms)
-
-  (report-result (quick-bench (ga-unimodal))) ; sets for everything
-  WARNING: Final GC required 2.708388131525833 % of runtime
-  Evaluation count             : 6
-  Execution time mean          : 10.342667 sec  95.0% CI: (10.141333 sec, 10.477333 sec)
-  Execution time std-deviation : 8.207178 sec  95.0% CI: (8.164337 sec, 8.216695 sec)
-
-  (report-result (quick-bench (ga-rastrigin))) ; no sets
-  Evaluation count             : 6
-  Execution time mean          : 1.733844 min  95.0% CI: (1.733533 min, 1.734556 min)
-  Execution time std-deviation : 1.467562 sec  95.0% CI: (1.449890 sec, 1.490528 sec)
-
-  (report-result (quick-bench (ga-rastrigin))) ; sets for everything
-  Evaluation count             : 6
-  Execution time mean          : 1.763867 min  95.0% CI: (1.763867 min, 1.766733 min)
-  Execution time std-deviation : 4.377838 sec  95.0% CI: (4.326957 sec, 4.412986 sec)
-"
-)
 
 (defn plot-ga
   [fname]
-  (let [res (unzip (map #(let [res (clojure.contrib.string/split #"," %)]
-                           [(Integer/parseInt (first res))
-                            (Double/parseDouble (last res))])
-                        (clojure.contrib.duck-streams/read-lines fname)))]
-    (incanter.core/view
-     (incanter.charts/line-chart
-      (first res) (last res)))))
+  (with-data (read-dataset fname :header true)
+    (doto (incanter.charts/line-chart :gen :avgfit :x-label "gen" :y-label "avgfit")
+      ;; at least this does not return a
+      ;; No method in multimethod 'add-lines*' for dispatch value: class org.jfree.data.category.DefaultCategoryDataset
+;      (-> #(incanter.charts/add-lines % :gen :diversity :x-label "gen" :y-label "diversity"))
+
+      view
+      incanter.charts/clear-background)
+    (doto (incanter.charts/line-chart :gen :diversity :x-label "gen" :y-label "diversity")
+      view
+      incanter.charts/clear-background)
+
+    ;; an indicator of the complexity of Java's architecture approach
+    ;; (let [chart (incanter.charts/line-chart :gen :avgfit :x-label "gen" :y-label "avgfit")
+    ;;       plot (-> chart .getPlot)
+    ;;       ds (.getDataset plot)
+    ;;       rax (.getRangeAxis plot)
+    ;;       cir (.getRenderer plot)
+    ;;       dax (org.jfree.chart.axis.CategoryAxis.)
+    ;;       wplot (org.jfree.chart.plot.CategoryPlot. ds dax rax cir)]
+    ;;   ;; returns true ...
+    ;;   (.setTickLabelsVisible (.getDomainAxis wplot) false)
+    ;;   (.isTickMarksVisible (.getDomainAxis wplot))
+
+    ;;   (doto (org.jfree.chart.JFreeChart. wplot)
+    ;;     view))
+    ))
+
 
 (defn blah
   "Count the number of collisions and mean length of collision chains when drawing nrep from dist"
@@ -406,6 +398,7 @@
               (reduce * (conseq-values 4
                                        (first (:dir map)) ; since expecting a list
                                        (:orig map) *unimodal-grid*)))
+        :df nil
         :srf select-reproducers-3
         :bsf >
         :mf mutate-2
@@ -420,10 +413,7 @@
         ;; unlike mchro, assume uniform to simulate not knowing anything
         ichro (struct-map chro-rastrigin
                 :bits-x1 ssvec
-                :bits-x2 ssvec)
-        mchro (struct-map chro-rastrigin
-                :bits-x1 mvec
-                :bits-x2 mvec)]
+                :bits-x2 ssvec)]
     (ga :numgen 67
         :mp 0.01
         :cp 1
@@ -432,15 +422,21 @@
         :nrep 25
         :nchilds 5
         :ichro ichro
-        :mchro mchro
-        :encf nil 
-        :decf nil
+;        :encf nil 
+;        :decf nil ; todo: specalized for this prob
         :ff (fn rastrigin [{bx1 :bits-x1, bx2 :bits-x2}]
               (let [x1 (binary-to-float bx1 2)
                     x2 (binary-to-float bx2 2)] ; todo: get rid of magic number
                 (+ 20 (* x1 x1) (* x2 x2) (* -10 (+ (Math/cos (* 2 Math/PI x1))
                                                     (Math/cos (* 2 Math/PI x2)))))))
+        :df (fn diversity-euclidean ; range [0,\inf)
+              [chro pop]
+              (let [lpop (seq pop)
+                    vs1 (map #(binary-to-float % 2) (map #(:bits-x1 %) lpop))
+                    vs2 (map #(binary-to-float % 2) (map #(:bits-x2 %) lpop))
+                    vs (unzip (list vs1 vs2))]
+                (average-euclidean-distance vs)))
         :srf select-reproducers-4
         :bsf <
-        :mf mutate-2
+        :mf mutate
         :cf one-point-crossover)))

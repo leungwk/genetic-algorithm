@@ -1,7 +1,7 @@
 (defproject prac "0.1.0"
   :description "For programming practice"
   :dependencies [[incanter/incanter-core "0.0.1-wleung-local"]
-                 ;[incanter/incanter-io "1.2.3-SNAPSHOT"]
+                 [incanter/incanter-io "0.0.1-wleung-local"]
                  [incanter/incanter-charts "0.0.1-wleung-local"]
                  ;[incanter/incanter-processing "1.2.3-SNAPSHOT"]
                  ;[incanter/incanter-mongodb "1.2.3-SNAPSHOT"]
