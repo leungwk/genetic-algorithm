@@ -1,8 +1,7 @@
 (ns ga.ga
   (:require [clojure.contrib.duck-streams :only (append-spit read-lines)])
-  (:require [clojure.contrib.string :only (split)])
   (:use [common.math :only (draw-nr prime? average-euclidean-distance)])
-  (:use [common.misc :only (unzip)])
+  (:use [common.misc :only (unzip binary-to-float float-to-binary)])
   (:use [clojure.contrib.seq-utils :only (separate)])
   (:use common.grid)
   (:use criterium.core) ; for benchmarking
@@ -81,10 +80,19 @@
   1  1  1  1  2  2  3  3  3  3  2  2  1  1  1  1
 ] 16))
 
+(defn select-reproducers-rank
+  "Rank scaling.
+
+  src: http://www.mathworks.se/access/helpdesk/help/toolbox/gads/f6691.html"
+  [nrep pop]
+  (if (> nrep (count pop))
+    pop
+    (draw-nr nrep (sort-by :fitness < pop) (map #(/ 1 %) (range 1 (+ 1 (count pop)))))))
+
 (defn select-reproducers-4 [nrep pop] ; maximization
   (let [maxfit (reduce max (map #(:fitness %) pop))]
     (cond (> nrep (count pop)) pop
-          :else (draw-nr nrep pop (map #(- maxfit -1 (:fitness %)) pop)))))
+          :else (draw-nr nrep pop (map #(- maxfit (- Float/MIN_VALUE) (:fitness %)) pop)))))
 
 (defn select-reproducers-3 [nrep pop] ; maximization
   (let [minfit (reduce min (map #(:fitness %) pop))]
@@ -114,8 +122,8 @@
           :else (concat popr (draw-nr diff pop0 (repeat npop0 1))))))
 
 (defn one-point-crossover [g1 g2] ; assume for now individuals have same structure
-  (let [gnf (dissoc (into {} g1) :fitness)
-        ks (keys gnf)]
+  (let [;gnf (dissoc (into {} g1) :fitness) ; todo: separate genotype from phenotype
+        ks (keys g1)]
     (map #(reduce merge %)
          (unzip
           (map (fn [k]
@@ -131,18 +139,6 @@
                        (list {k (vec (concat v1p1 v2p2))}
                              {k (vec (concat v2p1 v1p2))})))))
                ks)))))
-
-(defn binary-to-float [bits idx]
-  "Convert a binary sequence to float, starting at 2^idx"
-  (let [nb (count bits)]
-    (reduce + (map #(if (= 1 %1) (Math/pow 2 %2) 0)
-                   bits
-                   (range idx (- idx nb) -1)))))
-
-(defn float-to-binary [num idx nbits]
-  "Convert a float to a binary sequence of nbits with MSB starting at 2^idx"
-  
-)
 
 (defn mutate-2
   ([chro]
@@ -198,135 +194,129 @@
              (map (fn [lm] (reduce #(merge-with + %1 %2) lm))
                   (unzip (cons ss (map #(f1 ck %) pop)))))
         f3 (fn [ck] ; create new chromosome slot
-             (let [ss (map #(reduce merge (map (fn [x] {x Float/MIN_VALUE}) %)) ; todo: replace with a minimal, non-zero value based on type
+             (let [ss (map #(reduce merge (map (fn [x] {x 1}) %)) ; todo: replace with a minimal, non-zero value based on type
                            (map #(keys %)
                                 (ck chro)))]
                {ck (vec (f2 ck pop ss))}))]
     (reduce merge (map f3 (keys chro)))))
 
+(defn take-first
+  "Return the first item in coll where (pred item) is true"
+  [pred coll]
+  (loop [lst coll]
+    (cond (empty? lst) nil
+          (pred (first lst)) (first lst)
+          :else (recur (rest lst)))))
+
+(defn box-muller
+  [mu sdsd]
+  (let [[w x y] (take-first (fn [[w x y]] (and (> w 0) (< w 1)))
+                            (repeatedly #(let [x (rand)
+                                               y (rand)
+                                               w (+ (Math/pow x 2)
+                                                    (Math/pow y 2))]
+                                           [w x y])))
+        tmp (Math/sqrt (* -2 (Math/log w) (/ 1 w)))]
+    [(+ mu (* sdsd x tmp))
+     (+ mu (* sdsd y tmp))]))
+
 (defn ga [& options]                    ; uses sets for everything
   (let [opts (when options (apply assoc {} options))
         numgen (or (:numgen opts) 10000)
-        mp (or (:mp opts) 0.05)         ; mutate probability
-        cp (or (:cp opts) 0.05)         ; crossover probability
-        nipop (or (:nipop opts) 20)
-        nbest (or (:nbest opts) 5) ; save nbest individuals from entire search
-        nrep (or (:nrep opts) 10)
-        nchilds (or (:nchilds opts) 5)
-        ichro (if (:ichro opts) (:ichro opts) (throw (new Exception "Unspecified initialization chromosome")))
-        ff (if (:ff opts) (:ff opts) (throw (new Exception "Unspecified fitness function")))
-        df (if (:df opts) (:df opts) (throw (new Exception "Unspecified diversity function")))
-        srf (if (:srf opts) (:srf opts) (throw (new Exception "Unspecified select reproducers function")))
-        bsf (if (:bsf opts) (:bsf opts) (throw (new Exception "Unspecified best sorting function")))
-        mf (if (:mf opts) (:mf opts) (throw (new Exception "Unspecified mutate function")))
-        cf (if (:cf opts) (:cf opts) (throw (new Exception "Unspecified crossover function")))]
+        ;; mr = 1 - cr
+;        mr (or (:mr opts) 0.05) ; mutation rate (% of pop to mutate)
+
+        ;; todo: allow for mu-plus-lambda and mu-comma-lambda modes
+;        qparent (or (:qparent opts) 0.05)
+
+        pr (or (:pr opts) 0.05) ; parental rate (% of pop to become parents)
+        cr (or (:cr opts) 0.05) ; crossover rate (% of pop to breed)
+        qpop (or (:qpop opts) 20) ; population quota
+        qbest (or (:qbest opts) 5) ; save nbest individuals from entire search
+        qelite (or (:qelite opts) 1)
+
+        test-ret (fn [test msg] (if test test (throw (new Exception msg))))
+        ichro (test-ret (:ichro opts) "Unspecified initialization chromosome")
+        ff (test-ret (:ff opts) "Unspecified fitness function")
+        df (test-ret (:df opts) "Unspecified diversity function")
+        nf (test-ret (:nf opts) "Unspecified noise function")
+        srf (test-ret (:srf opts) "Unspecified select reproducers function")
+        bsf (test-ret (:bsf opts) "Unspecified best sorting function")
+        mf (test-ret (:mf opts) "Unspecified mutate function")
+        cf (test-ret (:cf opts) "Unspecified crossover function")]
                     
-    (let [assoc-fitness (fn [x]
-                          (assoc x :fitness (ff x)))
-          gen-rand-indiv #(assoc-fitness (mf %))
-          gen-mutant #(assoc-fitness (mf %))
-          gen-init-pop (fn [num] (set (repeatedly num #(gen-rand-indiv ichro))))
-          ipop (gen-init-pop nipop)
-          popquota (+ nrep (* nchilds 2))
+    (let [assoc-fitness #(assoc % :fitness (ff %))
+          dissoc-fitness #(dissoc % :fitness)
+          ipop (repeatedly qpop #(mf ichro)) ; gen-init-pop
+          nparents 2
+
           timestamp (.format (new java.text.SimpleDateFormat "yyyy-MM-dd'T'hhmmss'.'SSS") (new java.util.Date))
           fpath (str "log/q11_ga_" timestamp ".log")]
-                                        ;      (println "Logging to " fpath)
       (println (str "(plot-ga \"" fpath "\")"))
       (clojure.contrib.duck-streams/append-spit
        fpath
        (str "gen" ","
             "avgfit" ","
-            "diversity"
+            "diversity" ","
+            "best"
             "\n"))
-
-      (loop [pop ipop, i 1, chro ichro, best (take nbest (sort-by :fitness bsf ipop))]
+      (loop [pop ipop, i 1, chro ichro, best ()]
         (if (> i numgen)
-          {:numgen numgen
-           :mp mp
-           :cp cp
-           :nipop nipop
-           :nbest nbest
-           :nrep nrep
-           :nchilds nchilds
-           :ichro chro ; final chro
+          {:ichro chro ; final chro
+           :best best}
+          (let [pop-wf (map assoc-fitness pop)
+                pop-sorted-wf (sort-by :fitness bsf pop-wf)
 
-           :best best
-           :curpop (sort-by :fitness bsf pop)}
-          (let [reps (srf nrep pop)
-                gen-children (fn [re]
-                               (map assoc-fitness
-                                    (let [nre (count re)
-                                          [p1 p2]
-                                          (vec (draw-nr 2 re (repeat nre 1)))] ; adjust selection method of parents
-                                      (cf p1 p2))))
-                mutant-fn #(if (< (rand) mp)
-                             #{(gen-mutant chro)}
-                             #{})
-                children-fn #(if (< (rand) cp)
-                               (gen-children reps)
-                               #{})
-                children (reduce union (repeatedly nchilds #(children-fn)))
-                mutant (mutant-fn)
-                gen-spawn #(union (mutant-fn) (children-fn)) ; use a different method to select spawn? (ie. something not quite total uniqueness (ie. sets), but also not quite no checking (ie. lists)). In Luke's book (30), this is Join(P,Breed(P))
-                tmppop (union reps children mutant)
-                newpop (loop [j 0, acc tmppop]
-                         (let [diff (- popquota (count acc))]
-                                        ;(swank.core/break)
-                           (if (or (<= diff 0) (>= i 1000)) ; arbitrary (though could optimize based on mp)
-                             acc
-                             (recur (+ j 1) (union (gen-spawn) acc)))))
+                wbest-wf (take qbest (sort-by :fitness bsf (concat pop-wf (map assoc-fitness best))))
+                wbest (map dissoc-fitness wbest-wf)
 
-                wchro (redist-chro chro newpop)
-                diversity (df wchro newpop)
-;                _ (swank.core/break)
+                parents-wf (srf (Math/round (* pr (count pop-sorted-wf)))
+                             pop-sorted-wf)
+                parents (map dissoc-fitness parents-wf)
+                elites-wf (take qelite pop-sorted-wf)
+                elites (map dissoc-fitness parents-wf)
+                diversity (df chro pop-sorted-wf)
+                ;; after this point, :fitness should not be used at all (todo: try to skip dissoc step)
 
-]
+                ;; todo: sanity check the initial values
+                nchilds (int (Math/round (/ (* cr qpop) 2))) ; always twins
+                nmutant (max 1 (- qpop (count elites) nchilds))
+                mutants (repeatedly nmutant #(mf chro))
+                children (let [[p1 p2] (repeatedly nparents #(draw parents))]
+                           (cf p1 p2))
+                ;; the noise func should be applied popluation-wide (after it has been generated) (and no, enforcing diversity does not necessarily mean using sets only)
+                                        ;#(nf % diversity)
+                ; newpop (union children mutants elites)
+                newpop (concat children mutants elites)]
+;                            (swank.core/break)
             (clojure.contrib.duck-streams/append-spit
              fpath
              (str i ","
-                  (incanter.stats/mean (map #(:fitness %) newpop)) ","
-                  diversity
+                  (incanter.stats/mean (map #(:fitness %) (map assoc-fitness newpop))) ","
+                  diversity ","
+                  (:fitness (first wbest-wf)) "\n"))
+            (println i)
 
- "\n"))
-                                        ;(println i)
-            (recur (if (<= (count newpop) 2) ; restart if newpop too low; select using best solutions so far ; todo: parameterize
-                     (union (gen-children (seq best))
-                            (gen-init-pop 5)) ; todo: parameterize
+            (recur (if (<= (count newpop) nparents) ; restart if newpop too low; select using best solutions so far ; todo: parameterize
+                     (let [ngen (- qpop (count best))]
+                       (concat wbest (repeatedly ngen #(mf ichro))))
                      newpop)
                    (+ i 1)
-                   wchro
-                   (set (take nbest (sort-by :fitness bsf (union best newpop)))))))))))
+                   chro
+                   wbest)))))))
 
 (defn plot-ga
   [fname]
   (with-data (read-dataset fname :header true)
     (doto (incanter.charts/line-chart :gen :avgfit :x-label "gen" :y-label "avgfit")
-      ;; at least this does not return a
-      ;; No method in multimethod 'add-lines*' for dispatch value: class org.jfree.data.category.DefaultCategoryDataset
-;      (-> #(incanter.charts/add-lines % :gen :diversity :x-label "gen" :y-label "diversity"))
-
       view
       incanter.charts/clear-background)
     (doto (incanter.charts/line-chart :gen :diversity :x-label "gen" :y-label "diversity")
       view
       incanter.charts/clear-background)
-
-    ;; an indicator of the complexity of Java's architecture approach
-    ;; (let [chart (incanter.charts/line-chart :gen :avgfit :x-label "gen" :y-label "avgfit")
-    ;;       plot (-> chart .getPlot)
-    ;;       ds (.getDataset plot)
-    ;;       rax (.getRangeAxis plot)
-    ;;       cir (.getRenderer plot)
-    ;;       dax (org.jfree.chart.axis.CategoryAxis.)
-    ;;       wplot (org.jfree.chart.plot.CategoryPlot. ds dax rax cir)]
-    ;;   ;; returns true ...
-    ;;   (.setTickLabelsVisible (.getDomainAxis wplot) false)
-    ;;   (.isTickMarksVisible (.getDomainAxis wplot))
-
-    ;;   (doto (org.jfree.chart.JFreeChart. wplot)
-    ;;     view))
-    ))
-
+    (doto (incanter.charts/line-chart :gen :best :x-label "gen" :y-label "best")
+      view
+      incanter.charts/clear-background)))
 
 (defn blah
   "Count the number of collisions and mean length of collision chains when drawing nrep from dist"
@@ -391,7 +381,7 @@
         :nipop 30
         :nbest 5
         :nrep 10
-        :nchilds 5
+;        :nchilds 5
         :ichro ichro
         :mchro mchro
         :ff (fn grid-product-2 [map]
@@ -409,34 +399,47 @@
   (let [nbits 10
         ub (Math/pow 2 nbits)
         ssvec (vec (replicate nbits {0 1, 1 1}))
-        mvec (vec (map #(vector [0 1] (/ (bit-shift-left 1 %) ub)) (range nbits))) ; {0 max-(2^k), 1 max-(max-2^k)}
         ;; unlike mchro, assume uniform to simulate not knowing anything
         ichro (struct-map chro-rastrigin
                 :bits-x1 ssvec
-                :bits-x2 ssvec)]
-    (ga :numgen 67
-        :mp 0.01
-        :cp 1
-        :nipop 50
-        :nbest 5
-        :nrep 25
-        :nchilds 5
+                :bits-x2 ssvec)
+        magic-idx 2] ; todo: do not use magic
+    (ga :numgen 10000
+;        :cp 1
+        :pr 0.95
+        :cr 0.9999
+        :qpop 50
+        :qbest 5
+        :qelite 1
+;        :nrep 40
+;        :nchilds 5
         :ichro ichro
 ;        :encf nil 
 ;        :decf nil ; todo: specalized for this prob
         :ff (fn rastrigin [{bx1 :bits-x1, bx2 :bits-x2}]
-              (let [x1 (binary-to-float bx1 2)
-                    x2 (binary-to-float bx2 2)] ; todo: get rid of magic number
+              (let [x1 (binary-to-float bx1 magic-idx)
+                    x2 (binary-to-float bx2 magic-idx)]
                 (+ 20 (* x1 x1) (* x2 x2) (* -10 (+ (Math/cos (* 2 Math/PI x1))
                                                     (Math/cos (* 2 Math/PI x2)))))))
-        :df (fn diversity-euclidean ; range [0,\inf)
-              [chro pop]
+        :df (fn diversity-euclidean [chro pop] ; range [0,\inf)
               (let [lpop (seq pop)
-                    vs1 (map #(binary-to-float % 2) (map #(:bits-x1 %) lpop))
-                    vs2 (map #(binary-to-float % 2) (map #(:bits-x2 %) lpop))
+                    vs1 (map #(binary-to-float % magic-idx) (map #(:bits-x1 %) lpop))
+                    vs2 (map #(binary-to-float % magic-idx) (map #(:bits-x2 %) lpop))
                     vs (unzip (list vs1 vs2))]
                 (average-euclidean-distance vs)))
-        :srf select-reproducers-4
+        :nf (fn noise-function [ind div]
+              (let [x1 (binary-to-float (:bits-x1 ind) magic-idx)
+                    x2 (binary-to-float (:bits-x2 ind) magic-idx)
+;                    wx1 (normal-distribution 0 (/ (Math/sqrt div) 1000)) ; not working (the rand num gen has the same seed)
+;                    wx2 (normal-distribution 0 (/ (Math/sqrt div) 1000))
+                    [bm1 bm2] ; (box-muller 0 (/ div 100000)) ; yikes, completely wrong (it should be an inverse relation on div)
+                    (box-muller 0 (/ 1 (max div 0.001)))
+                    wx1 (+ bm1 x1)
+                    wx2 (+ bm2 x2)]
+                ;; decode: float-to-binary (I should separate out the procedures to avoid magic)
+                {:bits-x1 (float-to-binary wx1 magic-idx nbits),
+                 :bits-x2 (float-to-binary wx2 magic-idx nbits)}))
+        :srf select-reproducers-rank
         :bsf <
         :mf mutate
         :cf one-point-crossover)))

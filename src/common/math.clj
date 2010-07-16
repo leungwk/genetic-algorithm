@@ -163,8 +163,11 @@
 (defmulti draw-nr (fn
                       ([n x] [(class n) (class x)])
                       ([n x y] [(class n) (class x) (class y)])))
-(defmethod draw-nr [java.lang.Integer java.util.Collection] [num coll] (draw-nr num coll (fn [x] 1)))
-(defmethod draw-nr [java.lang.Integer java.util.Collection clojure.lang.Sequential] [num coll freqs]
+; so Integer doesn't inheret from Long? ...
+(defmethod draw-nr [java.lang.Integer clojure.lang.Sequential] [num coll] (draw-nr (bigint num) coll (fn [x] 1)))
+(defmethod draw-nr [java.lang.Integer clojure.lang.Sequential clojure.lang.Sequential] [num coll freqs] (draw-nr (bigint num) coll freqs))
+(defmethod draw-nr [java.lang.Long clojure.lang.Sequential clojure.lang.Sequential] [num coll freqs] (draw-nr (bigint num) coll freqs))
+(defmethod draw-nr [java.math.BigInteger clojure.lang.Sequential clojure.lang.Sequential] [num coll freqs]
            (cond (not (= (count coll) (count freqs))) (throw (new Exception "coll and freqs sizes not equal"))
                  (> num (count coll)) (throw (new Exception "k exceeds coll size"))
                  :else
