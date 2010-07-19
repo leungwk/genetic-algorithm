@@ -80,14 +80,32 @@
   1  1  1  1  2  2  3  3  3  3  2  2  1  1  1  1
 ] 16))
 
+(defn select-tournament
+  "Tournament selection.
+
+pop should be genotype only (no fitness value). ff-encf will convert genotype into phenotype (and handle encoding). bsf indicates if maximizing or minimizing.
+
+src: http://en.wikipedia.org/wiki/Tournament_selection"
+  [nrep pop ff-encf bsf]
+  {:pre [(>= nrep 1)]}
+  (let [t 2
+        sf (fn [] (loop [i 2, best (draw pop)]
+                    (if (> i t)
+                      best
+                      (let [cand (draw pop)]
+                        (recur (+ i 1) (if (bsf (ff-encf cand)
+                                                (ff-encf best))
+                                         cand best))))))]
+    (repeatedly nrep sf)))
+
 (defn select-reproducers-rank
   "Rank scaling.
 
   src: http://www.mathworks.se/access/helpdesk/help/toolbox/gads/f6691.html"
-  [nrep pop]
+  [nrep pop bsf]
   (if (> nrep (count pop))
     pop
-    (draw-nr nrep (sort-by :fitness < pop) (map #(/ 1 %) (range 1 (+ 1 (count pop)))))))
+    (draw-nr nrep (sort-by :fitness bsf pop) (map #(/ 1 %) (range 1 (+ 1 (count pop)))))))
 
 (defn select-reproducers-4 [nrep pop] ; maximization
   (let [maxfit (reduce max (map #(:fitness %) pop))]
@@ -121,8 +139,11 @@
           (<= diff 0) (draw-nr nrep popr poprf)
           :else (concat popr (draw-nr diff pop0 (repeat npop0 1))))))
 
-(defn one-point-crossover [g1 g2] ; assume for now individuals have same structure
-  (let [;gnf (dissoc (into {} g1) :fitness) ; todo: separate genotype from phenotype
+(defn one-point-crossover [parents]
+  ;; assume for now individuals have same structure
+  {:pre [(>= (count parents) 2)]}
+  (let [g1 (first parents)
+        g2 (second parents)
         ks (keys g1)]
     (map #(reduce merge %)
          (unzip
@@ -220,7 +241,7 @@
     [(+ mu (* sdsd x tmp))
      (+ mu (* sdsd y tmp))]))
 
-(defn ga [& options]                    ; uses sets for everything
+(defn ga [& options]
   (let [opts (when options (apply assoc {} options))
         numgen (or (:numgen opts) 10000)
         ;; mr = 1 - cr
@@ -231,12 +252,14 @@
 
         pr (or (:pr opts) 0.05) ; parental rate (% of pop to become parents)
         cr (or (:cr opts) 0.05) ; crossover rate (% of pop to breed)
-        qpop (or (:qpop opts) 20) ; population quota
+        qpop (or (:qpop opts) 50) ; population quota
         qbest (or (:qbest opts) 5) ; save nbest individuals from entire search
         qelite (or (:qelite opts) 1)
 
         test-ret (fn [test msg] (if test test (throw (new Exception msg))))
         ichro (test-ret (:ichro opts) "Unspecified initialization chromosome")
+        encf (test-ret (:encf opts) "Unspecified encoder function")
+        decf (test-ret (:decf opts) "Unspecified decoder function")
         ff (test-ret (:ff opts) "Unspecified fitness function")
         df (test-ret (:df opts) "Unspecified diversity function")
         nf (test-ret (:nf opts) "Unspecified noise function")
@@ -244,8 +267,12 @@
         bsf (test-ret (:bsf opts) "Unspecified best sorting function")
         mf (test-ret (:mf opts) "Unspecified mutate function")
         cf (test-ret (:cf opts) "Unspecified crossover function")]
+
+    ;; initial error checks
+    (test-ret (>= qpop qelite) "Elite quote exceeds population quota")
                     
-    (let [assoc-fitness #(assoc % :fitness (ff %))
+    (let [ff-encf #(ff (encf %))
+          assoc-fitness #(assoc % :fitness (ff-encf %))
           dissoc-fitness #(dissoc % :fitness)
           ipop (repeatedly qpop #(mf ichro)) ; gen-init-pop
           nparents 2
@@ -267,43 +294,49 @@
           (let [pop-wf (map assoc-fitness pop)
                 pop-sorted-wf (sort-by :fitness bsf pop-wf)
 
-                wbest-wf (take qbest (sort-by :fitness bsf (concat pop-wf (map assoc-fitness best))))
-                wbest (map dissoc-fitness wbest-wf)
+                wbest-wf (take qbest
+                               (sort-by :fitness bsf
+                                        (concat pop-wf
+                                                (map assoc-fitness best))))
 
-                parents-wf (srf (Math/round (* pr (count pop-sorted-wf)))
-                             pop-sorted-wf)
+                ;wbest (map dissoc-fitness wbest-wf); unneeded because assoc drops old value if duplicate key
+
+                parents-wf (srf (Math/round (* pr (count pop)))
+                                pop
+                                ff-encf
+                                bsf)
                 parents (map dissoc-fitness parents-wf)
                 elites-wf (take qelite pop-sorted-wf)
-                elites (map dissoc-fitness parents-wf)
-                diversity (df chro pop-sorted-wf)
+                nelites (count elites-wf)
+                diversity (df chro pop encf)
                 ;; after this point, :fitness should not be used at all (todo: try to skip dissoc step)
 
-                ;; todo: sanity check the initial values
-                nchilds (int (Math/round (/ (* cr qpop) 2))) ; always twins
-                nmutant (max 1 (- qpop (count elites) nchilds))
-                mutants (repeatedly nmutant #(mf chro))
-                children (let [[p1 p2] (repeatedly nparents #(draw parents))]
-                           (cf p1 p2))
-                ;; the noise func should be applied popluation-wide (after it has been generated) (and no, enforcing diversity does not necessarily mean using sets only)
-                                        ;#(nf % diversity)
-                ; newpop (union children mutants elites)
-                newpop (concat children mutants elites)]
-;                            (swank.core/break)
+                nspawn (- qpop nelites)
+                spawn (loop [i nspawn, acc ()]
+                        (if (<= i 0)
+                          acc
+                          (if (< (rand) cr)
+                            (recur (- i 2)
+                                   (concat (cf (repeatedly nparents #(draw parents)))
+                                           acc))
+                            (recur (- i 1) (cons (mf chro) acc)))))
+                newpop (concat spawn elites-wf)]
             (clojure.contrib.duck-streams/append-spit
              fpath
              (str i ","
-                  (incanter.stats/mean (map #(:fitness %) (map assoc-fitness newpop))) ","
+                  (incanter.stats/mean (map #(:fitness %)
+                                            (map assoc-fitness newpop))) ","
                   diversity ","
                   (:fitness (first wbest-wf)) "\n"))
             (println i)
 
-            (recur (if (<= (count newpop) nparents) ; restart if newpop too low; select using best solutions so far ; todo: parameterize
+            (recur (if (<= (count newpop) nparents) ; restart if newpop too low
                      (let [ngen (- qpop (count best))]
-                       (concat wbest (repeatedly ngen #(mf ichro))))
+                       (concat wbest-wf (repeatedly ngen #(mf ichro))))
                      newpop)
                    (+ i 1)
                    chro
-                   wbest)))))))
+                   wbest-wf)))))))
 
 (defn plot-ga
   [fname]
@@ -317,50 +350,6 @@
     (doto (incanter.charts/line-chart :gen :best :x-label "gen" :y-label "best")
       view
       incanter.charts/clear-background)))
-
-(defn blah
-  "Count the number of collisions and mean length of collision chains when drawing nrep from dist"
-  [nrep dist]
-  (loop [i 0, ncacc (), mlaacc (), mlcacc ()] ; num collision, mean chain length (all), mean chain length (collisions)
-;    (println i)
-    (if (>= i 100)                      ; num of statistical samples
-      (println (str "| " nrep " | " (incanter.stats/mean ncacc) " | " (incanter.stats/mean mlaacc) " | " (incanter.stats/mean mlcacc) " |"))
-      (let [vs (vals (frequencies (repeatedly nrep #(draw dist))))
-            cs (remove #(= 1 %) vs)]
-        (recur (+ i 1)
-               (cons (reduce + cs) ncacc)
-               (cons (incanter.stats/mean vs) mlaacc)
-               (cons (incanter.stats/mean cs) mlcacc))))))
-
-(defn blah-2
-  "Count the number of collisions, and store the distributions of collision chain lengths when drawing nrep from dist"
-  [nrep dist]
-  (loop [i 0, ncacc (), mlaacc {}] ; num collision, mean chain length (all), mean chain length (collisions)
-                                        ;    (println i)
-    (if (>= i 100)                      ; num of statistical samples
-      (let [ma (format "%.2f"
-                       (float (/ (reduce + (map #(* (key %) (/ (val %) 100)) mlaacc))
-                                 (reduce + (map #(key %) mlaacc)))))
-            x (dissoc mlaacc 1)
-            mc (format "%.2f"
-                       (float (/ (reduce + (map #(* (key %) (/ (val %) 100)) x))
-                                 (reduce + (map #(key %) x)))))]
-        (println
-         (str "| " nrep " | " (incanter.stats/mean ncacc) " | "
-              ma " | " mc
-              (reduce str
-                      (map #(str " | "(key %) " | " (format "%.2f" (val %)))
-                           (reduce merge
-                                   (map #(hash-map (key %)
-                                                   (float (/ (val %) 100)))
-                                        mlaacc))))
-              " |")))
-      (let [x (frequencies (repeatedly nrep #(draw dist)))
-            vs (frequencies (vals x))
-            cs (dissoc vs 1)]
-        (recur (+ i 1)
-               (cons (reduce + (map #(* (key %) (val %)) cs)) ncacc)
-               (merge-with + vs mlaacc))))))
 
 (defstruct chro-grid :dir :orig)
 (defn ga-unimodal []
@@ -399,47 +388,41 @@
   (let [nbits 10
         ub (Math/pow 2 nbits)
         ssvec (vec (replicate nbits {0 1, 1 1}))
-        ;; unlike mchro, assume uniform to simulate not knowing anything
         ichro (struct-map chro-rastrigin
                 :bits-x1 ssvec
                 :bits-x2 ssvec)
         magic-idx 2] ; todo: do not use magic
-    (ga :numgen 10000
-;        :cp 1
+    (ga :numgen 1000
         :pr 0.95
-        :cr 0.9999
+        :cr 0.99
         :qpop 50
         :qbest 5
         :qelite 1
-;        :nrep 40
-;        :nchilds 5
         :ichro ichro
-;        :encf nil 
-;        :decf nil ; todo: specalized for this prob
-        :ff (fn rastrigin [{bx1 :bits-x1, bx2 :bits-x2}]
-              (let [x1 (binary-to-float bx1 magic-idx)
-                    x2 (binary-to-float bx2 magic-idx)]
-                (+ 20 (* x1 x1) (* x2 x2) (* -10 (+ (Math/cos (* 2 Math/PI x1))
-                                                    (Math/cos (* 2 Math/PI x2)))))))
-        :df (fn diversity-euclidean [chro pop] ; range [0,\inf)
-              (let [lpop (seq pop)
-                    vs1 (map #(binary-to-float % magic-idx) (map #(:bits-x1 %) lpop))
-                    vs2 (map #(binary-to-float % magic-idx) (map #(:bits-x2 %) lpop))
-                    vs (unzip (list vs1 vs2))]
+        ;; seems like a waste
+        :encf (fn encode [{bx1 :bits-x1, bx2 :bits-x2}]
+                (let [x1 (binary-to-float bx1 magic-idx)
+                      x2 (binary-to-float bx2 magic-idx)]
+                  {:x1 x1,
+                   :x2 x2}))
+        :decf (fn decode [{x1 :x1, x2 :x2}]
+                {:bits-x1 (float-to-binary x1 magic-idx nbits),
+                 :bits-x2 (float-to-binary x2 magic-idx nbits)})
+        :ff (fn rastrigin [{x1 :x1, x2 :x2}]
+              (+ 20 (* x1 x1) (* x2 x2) (* -10 (+ (Math/cos (* 2 Math/PI x1))
+                                                  (Math/cos (* 2 Math/PI x2))))))
+        :df (fn diversity-euclidean [chro pop encf] ; range [0,\inf)
+              (let [vs (map #(let [x (encf %)] ; get phenotype from genotype
+                               [(:x1 x) (:x2 x)]) pop)]
                 (average-euclidean-distance vs)))
-        :nf (fn noise-function [ind div]
-              (let [x1 (binary-to-float (:bits-x1 ind) magic-idx)
-                    x2 (binary-to-float (:bits-x2 ind) magic-idx)
-;                    wx1 (normal-distribution 0 (/ (Math/sqrt div) 1000)) ; not working (the rand num gen has the same seed)
-;                    wx2 (normal-distribution 0 (/ (Math/sqrt div) 1000))
-                    [bm1 bm2] ; (box-muller 0 (/ div 100000)) ; yikes, completely wrong (it should be an inverse relation on div)
+        :nf (fn noise-function [ind div encf]
+              (let [{x1 :x1, x2 :x2} (encf ind)
+                    [bm1 bm2]
                     (box-muller 0 (/ 1 (max div 0.001)))
                     wx1 (+ bm1 x1)
                     wx2 (+ bm2 x2)]
-                ;; decode: float-to-binary (I should separate out the procedures to avoid magic)
-                {:bits-x1 (float-to-binary wx1 magic-idx nbits),
-                 :bits-x2 (float-to-binary wx2 magic-idx nbits)}))
-        :srf select-reproducers-rank
+                {:x1 x1, :x2 x2}))
+        :srf select-tournament
         :bsf <
         :mf mutate
         :cf one-point-crossover)))
