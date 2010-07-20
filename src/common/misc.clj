@@ -1,4 +1,6 @@
 (ns common.misc
+  (:require [incanter.stats :only (mean)])
+  (:use incanter.distributions)
   (:require [clojure.contrib.string :only (split)]))
 
 ;; '#' does an autogensym on the symbol it is appended to
@@ -62,11 +64,7 @@ ex. (make-palindrome 'string') => 'gnirtsstring'"
   (unzip '((\"x\" 1) (\"y\" 2) (\"z\" 3 3.0)))  =>  ((\"x\" \"y\" \"z\") (1 2 3))
   (unzip '((\"x\" 1 1.0) (\"y\" 2) (\"z\" 3 3.0)))  =>  ((\"x\" \"y\" \"z\") (1 2 3))"
   [coll]
-  (loop [lst coll, acc ()]
-    (if (some empty? lst)
-      acc
-      (recur (map rest lst)
-             (concat acc (list (map first lst)))))))
+  (apply map vector coll))
 
 (defn binary-to-float
   "Convert a binary sequence to float, starting at 2^idx"
