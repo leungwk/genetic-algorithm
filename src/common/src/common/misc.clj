@@ -139,4 +139,4 @@ ex. (make-palindrome 'string') => 'gnirtsstring'"
             cs (dissoc vs 1)]
         (recur (+ i 1)
                (cons (reduce + (map #(* (key %) (val %)) cs)) ncacc)
-               (merge-with + vs mlaacc))))))
+               (merge-with + vs mlaacc))))))\n;; line 1
