@@ -141,3 +141,4 @@ ex. (make-palindrome 'string') => 'gnirtsstring'"
                (cons (reduce + (map #(* (key %) (val %)) cs)) ncacc)
                (merge-with + vs mlaacc))))))\n;; line 1
 ;; line 2
+;; line 1

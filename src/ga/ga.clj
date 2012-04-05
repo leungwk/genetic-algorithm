@@ -426,3 +426,17 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
         :bsf <
         :mf mutate
         :cf one-point-crossover)))
+
+(comment
+(fn rosenbrock [{x1 :x1, x2 :x2}]
+              (+ (* (- 1 x1) (- 1 x1))
+                 (* 100
+                    (- x2 (* x1 x1))
+                    (- x2 (* x1 x1)))))
+(fn rastrigin [{x1 :x1, x2 :x2}]
+              (+ 20 (* x1 x1) (* x2 x2) (* -10 (+ (Math/cos (* 2 Math/PI x1))
+                                                  (Math/cos (* 2 Math/PI x2))))))
+(fn paraboloid [{x1 :x1, x2 :x2}]
+              (+ (* x1 x1)
+                 (* x2 x2)))
+)

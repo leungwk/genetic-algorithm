@@ -1,3 +1,5 @@
+; -*- mode: org;-*-
+
 Ensure the following directories are on the classpath
 
 ~/src/euler/src/ # provide euler and subnamespaces
@@ -11,3 +13,16 @@ Local dependicies go into lib/
 
 
 This project is used for practicing and engraining good programming habits, such as writing unit tests, using a profiler (jvisualvm), doing revision control, using a debugger ()
+
+
+
+Eval all in ga.clj. Give it some time.
+Then in repl:
+(in-ns 'ga.ga)
+# (ga-unimodal) # Unspecified encoder function
+(ga-rastrigin)
+# will then print out best and "qbest 5" (ie. top 5)
+
+* Bugs
+** FileNotFoundException if =log/= does not exist at project top level
+when called by writers, such as =clojure.contrib.duck-streams/append-spit=.
