@@ -1,14 +1,22 @@
 (ns ga.ga
-  (:require [clojure.contrib.duck-streams :only (append-spit read-lines)])
-  (:use [common.math :only (draw-nr prime? average-euclidean-distance)])
+  (:require [clojure.java.io :only (writer)])
+
+  (:use [common.math :only (draw-nr average-euclidean-distance)])
   (:use [common.misc :only (unzip binary-to-float float-to-binary)])
-  (:use [clojure.contrib.seq-utils :only (separate)])
-  (:use common.grid)
-  (:use criterium.core) ; for benchmarking
-  (:use clojure.set)
-  (:use incanter.core)
-  (:use [incanter.distributions :exclude (roulette-wheel)])
-  (:use [incanter.io :only (read-dataset)]))
+
+  (:require [incanter core stats])
+  (:use [incanter.core :only (matrix)])
+
+  (:use [incanter.distributions :only (draw)])
+)
+
+; from https://github.com/richhickey/clojure-contrib/blob/95dddbbdd748b0cc6d9c8486b8388836e6418848/src/main/clojure/clojure/contrib/seq_utils.clj#L45
+; at least until I can figure out what library it is in now
+(defn separate
+  "Returns a vector:
+  [ (filter f s), (filter (complement f) s) ]"
+  [f s]
+  [(filter f s) (filter (complement f) s)])
 
 (def *unimodal-grid*
      (matrix [
@@ -280,13 +288,24 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
           timestamp (.format (new java.text.SimpleDateFormat "yyyy-MM-dd'T'hhmmss'.'SSS") (new java.util.Date))
           fpath (str "log/q11_ga_" timestamp ".log")]
       (println (str "(plot-ga \"" fpath "\")"))
-      (clojure.contrib.duck-streams/append-spit
-       fpath
-       (str "gen" ","
-            "avgfit" ","
-            "diversity" ","
-            "best"
-            "\n"))
+
+      ;; todo: fix (make 2nd expr work)
+      ;; (clojure.contrib.duck-streams/append-spit
+      ;;  fpath
+      ;;  (str "gen" ","
+      ;;       "avgfit" ","
+      ;;       "diversity" ","
+      ;;       "best"
+      ;;       "\n"))
+      ;;
+      ;; (with-open [wtr (clojure.java.io/writer fpath :append true)]
+      ;;   (.write (str "gen" ","
+      ;;                "avgfit" ","
+      ;;                "diversity" ","
+      ;;                "best"
+      ;;                "\n")))
+
+
       (loop [pop ipop, i 1, chro ichro, best ()]
         (if (> i numgen)
           {:ichro chro ; final chro
@@ -321,13 +340,23 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
                                            acc))
                             (recur (- i 1) (cons (mf chro) acc)))))
                 newpop (concat spawn elites-wf)]
-            (clojure.contrib.duck-streams/append-spit
-             fpath
-             (str i ","
-                  (incanter.stats/mean (map #(:fitness %)
-                                            (map assoc-fitness newpop))) ","
-                  diversity ","
-                  (:fitness (first wbest-wf)) "\n"))
+
+            ;; todo: fix (make 2nd expr work)
+            ;; (clojure.contrib.duck-streams/append-spit
+            ;;  fpath
+            ;;  (str i ","
+            ;;       (incanter.stats/mean (map #(:fitness %)
+            ;;                                 (map assoc-fitness newpop))) ","
+            ;;       diversity ","
+            ;;       (:fitness (first wbest-wf)) "\n"))
+            ;;
+            ;; (with-open [wtr (clojure.java.io/writer fpath :append true)]
+            ;;   (.write (str i ","
+            ;;       (incanter.stats/mean (map #(:fitness %)
+            ;;                                 (map assoc-fitness newpop))) ","
+            ;;       diversity ","
+            ;;       (:fitness (first wbest-wf)) "\n")))
+
             (println i)
 
             (recur (if (<= (count newpop) nparents) ; restart if newpop too low
@@ -338,50 +367,50 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
                    chro
                    wbest-wf)))))))
 
-(defn plot-ga
-  [fname]
-  (with-data (read-dataset fname :header true)
-    (doto (incanter.charts/line-chart :gen :avgfit :x-label "gen" :y-label "avgfit")
-      view
-      incanter.charts/clear-background)
-    (doto (incanter.charts/line-chart :gen :diversity :x-label "gen" :y-label "diversity")
-      view
-      incanter.charts/clear-background)
-    (doto (incanter.charts/line-chart :gen :best :x-label "gen" :y-label "best")
-      view
-      incanter.charts/clear-background)))
+;; (defn plot-ga
+;;   [fname]
+;;   (with-data (read-dataset fname :header true)
+;;     (doto (incanter.charts/line-chart :gen :avgfit :x-label "gen" :y-label "avgfit")
+;;       view
+;;       incanter.charts/clear-background)
+;;     (doto (incanter.charts/line-chart :gen :diversity :x-label "gen" :y-label "diversity")
+;;       view
+;;       incanter.charts/clear-background)
+;;     (doto (incanter.charts/line-chart :gen :best :x-label "gen" :y-label "best")
+;;       view
+;;       incanter.charts/clear-background)))
 
-(defstruct chro-grid :dir :orig)
-(defn ga-unimodal []
-  (let [[nrow ncol] (dim *unimodal-grid*)
-        ichro (struct-map chro-grid
-                :dir [(reduce merge (map #(hash-map % 1) *dirs*))]
-                :orig [(reduce merge (map #(hash-map % 1)
-                                          (range nrow)))
-                       (reduce merge (map #(hash-map % 1)
-                                          (range ncol)))])
-        mchro (struct-map chro-grid
-                :dir [[*dirs* 0.25]] ; use p = 1 for mp to control completely
-                :orig [[(range nrow) 0.25]
-                       [(range ncol) 0.25]])]
-    (ga :numgen 100
-        :mp 0.001
-        :cp 0.5
-        :nipop 30
-        :nbest 5
-        :nrep 10
-;        :nchilds 5
-        :ichro ichro
-        :mchro mchro
-        :ff (fn grid-product-2 [map]
-              (reduce * (conseq-values 4
-                                       (first (:dir map)) ; since expecting a list
-                                       (:orig map) *unimodal-grid*)))
-        :df nil
-        :srf select-reproducers-3
-        :bsf >
-        :mf mutate-2
-        :cf one-point-crossover)))
+;; (defstruct chro-grid :dir :orig)
+;; (defn ga-unimodal []
+;;   (let [[nrow ncol] (dim *unimodal-grid*)
+;;         ichro (struct-map chro-grid
+;;                 :dir [(reduce merge (map #(hash-map % 1) *dirs*))]
+;;                 :orig [(reduce merge (map #(hash-map % 1)
+;;                                           (range nrow)))
+;;                        (reduce merge (map #(hash-map % 1)
+;;                                           (range ncol)))])
+;;         mchro (struct-map chro-grid
+;;                 :dir [[*dirs* 0.25]] ; use p = 1 for mp to control completely
+;;                 :orig [[(range nrow) 0.25]
+;;                        [(range ncol) 0.25]])]
+;;     (ga :numgen 100
+;;         :mp 0.001
+;;         :cp 0.5
+;;         :nipop 30
+;;         :nbest 5
+;;         :nrep 10
+;; ;        :nchilds 5
+;;         :ichro ichro
+;;         :mchro mchro
+;;         :ff (fn grid-product-2 [map]
+;;               (reduce * (conseq-values 4
+;;                                        (first (:dir map)) ; since expecting a list
+;;                                        (:orig map) *unimodal-grid*)))
+;;         :df nil
+;;         :srf select-reproducers-3
+;;         :bsf >
+;;         :mf mutate-2
+;;         :cf one-point-crossover)))
 
 (defstruct chro-rastrigin :bits-x1 :bits-x2)
 (defn ga-rastrigin []
@@ -392,7 +421,7 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
                 :bits-x1 ssvec
                 :bits-x2 ssvec)
         magic-idx 2] ; todo: do not use magic
-    (ga :numgen 1000
+    (ga :numgen 100
         :pr 0.95
         :cr 0.99
         :qpop 50

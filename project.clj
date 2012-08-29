@@ -1,20 +1,12 @@
-(defproject prac "0.1.0"
-  :description "For programming practice"
-  :dependencies [[incanter/incanter-core "0.0.1-wleung-local"]
-                 [incanter/incanter-io "0.0.1-wleung-local"]
-                 [incanter/incanter-charts "0.0.1-wleung-local"]
-                 ;[incanter/incanter-processing "1.2.3-SNAPSHOT"]
-                 ;[incanter/incanter-mongodb "1.2.3-SNAPSHOT"]
-                 ;[incanter/incanter-pdf "1.2.3-SNAPSHOT"]
-                 ;[incanter/incanter-latex "1.2.3-SNAPSHOT"]
-                 [criterium "0.0.1-SNAPSHOT"]]
-;  :dependencies [[org.clojure/clojure "1.1.0"]
-;                 [org.clojure/clojure-contrib "1.1.0"]]
-  :dev-dependencies [[lein-javac "0.0.2-SNAPSHOT"]
-                     [lein-clojars "0.5.0-SNAPSHOT"]
-                     [swank-clojure "1.2.1"]
-                     [jline "0.9.94"]]
-  :repositories {"clojure-releases" "http://build.clojure.org/releases"}
+(defproject ga "0.1.0"
+  :description "Genetic algorithm for general function optimization."
+  :dependencies [
+                 [incanter/incanter-core "1.3.0"]
+
+                 [org.clojure/math.numeric-tower "0.0.1"]
+
+                 [org.clojure/clojure "1.5.0-alpha4"]
+                 [org.clojure/tools.nrepl "0.2.0-beta9"]
+                 ]
   :properties {:author "William Leung"}
-;  :jvm-opts []
 )

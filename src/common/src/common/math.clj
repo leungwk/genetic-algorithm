@@ -1,10 +1,9 @@
 (ns common.math
-  (:use [incanter.core :exclude (euclidean-distance)])
-  (:use (incanter core stats charts))
-  (:require [clojure.contrib.probabilities.finite-distributions :as finite-distributions])
-  (:require clojure.contrib.math)
-  (:use [clojure.contrib.seq-utils :only (positions)])
-  (:use [common.misc :only (unzip)]))
+  (:use [clojure.math.numeric-tower :only (abs exact-integer-sqrt)])
+  (:require [incanter core stats])
+)
+
+(def PHI 1.61803398874989484820)
 
 ;; from http://clojure-euler.wikispaces.com/The+Optimal+Toolkit
 (defn divisible?
@@ -51,17 +50,11 @@
   ([x y] (* (/ (abs x) (gcd x y)) y)) ; since (gcd x y) is a divisor of (abs x)
   ([x y & more] (reduce lcm (lcm x y) more)))
 
-(def PHI 1.61803398874989484820)
-
-(defn fib-n
-  "Warning: lost precision imminent"
-  [num]
-  (int (Math/floor (+ (/ (Math/pow PHI num) (Math/sqrt 5)) 0.5))))
-
 (defn perfect-square?
   "A number that is the square of an integer. That is, its square root does not have any decimal places"
-  [num]
-  (= (Math/pow (Math/round (Math/sqrt num)) 2) num))
+  [n]
+  (let [[res err] (exact-integer-sqrt n)]
+    (zero? err)))
 
 (defn fib?
   "N is a fib number iff (5N^2 +4) or (5N^2 -4) is a perfect square"
@@ -167,7 +160,7 @@
 (defmethod draw-nr [java.lang.Integer clojure.lang.Sequential] [num coll] (draw-nr (bigint num) coll (fn [x] 1)))
 (defmethod draw-nr [java.lang.Integer clojure.lang.Sequential clojure.lang.Sequential] [num coll freqs] (draw-nr (bigint num) coll freqs))
 (defmethod draw-nr [java.lang.Long clojure.lang.Sequential clojure.lang.Sequential] [num coll freqs] (draw-nr (bigint num) coll freqs))
-(defmethod draw-nr [java.math.BigInteger clojure.lang.Sequential clojure.lang.Sequential] [num coll freqs]
+(defmethod draw-nr [clojure.lang.BigInt clojure.lang.Sequential clojure.lang.Sequential] [num coll freqs]
            (cond (not (= (count coll) (count freqs))) (throw (new Exception "coll and freqs sizes not equal"))
                  (> num (count coll)) (throw (new Exception "k exceeds coll size"))
                  :else
@@ -202,3 +195,14 @@
                                 (reduce + (map (fn [vj]
                                                  (ef vi vj)) coll)))
                               coll))))
+
+; will this handle arbitrary numbers? (no, but change it at that time, not now)
+(defn truncate-int
+  "Truncates num to ndig and return as a number"
+  [num ndig]
+  {:pre [(>= ndig 1)]}
+  (let [snum (str num)
+        lsnum (count snum)]
+    (if (<= lsnum ndig)
+      num ; unsure it makes sense
+      (bigint (subs snum (- lsnum ndig))))))

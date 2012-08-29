@@ -1,7 +1,9 @@
 (ns common.grid
-  (:use incanter.core))
+  (:use [incanter.core :only (dim sel)])
+;(:use incanter.core)
+)
 
-(def *dirs* '(n ne e se s sw w nw))
+(def DIRS '(n ne e se s sw w nw))
 
 (defn on-grid?
   [coord grid]

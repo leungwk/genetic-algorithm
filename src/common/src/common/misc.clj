@@ -1,7 +1,6 @@
 (ns common.misc
-  (:require [incanter.stats :only (mean)])
-  (:use incanter.distributions)
-  (:require [clojure.contrib.string :only (split)]))
+  (:require [clojure.string :only (split)])
+)
 
 ;; '#' does an autogensym on the symbol it is appended to
 ;; '~' is unquote
@@ -82,63 +81,17 @@ ex. (make-palindrome 'string') => 'gnirtsstring'"
   {:pre [(>= num 0), (>= nbits 0)]}
   (if (= nbits 0)
     ()
-    (let [[integral-str frac-str] (clojure.contrib.string/split #"\." (Float/toString num))
+    (let [[integral-str frac-str] (clojure.string/split (Float/toString num) #"\.")
           integral (Integer/parseInt integral-str)
           frac (Float/parseFloat (str "0." frac-str))
           nfracbits (- nbits idx 1)
           int-bits (map #(Integer/parseInt %)
-                        (drop 1 (clojure.contrib.string/split #"" (Integer/toBinaryString integral))))
+                        (drop 1 (clojure.string/split (Integer/toBinaryString integral) #"")))
           frac-bits (loop [k nfracbits, f frac, acc ()]
                       (if (<= k 0)
                         acc
-                        (let [[in-str f-str] (clojure.contrib.string/split #"\." (Float/toString (* f 2)))]
+                        (let [[in-str f-str] (clojure.string/split (Float/toString (* f 2)) #"\.")]
                           (recur (- k 1)
                                  (Float/parseFloat (str "0." f-str))
                                  (concat acc (list (if (= "1" in-str) 1 0)))))))]
       (concat int-bits frac-bits))))
-
-(defn count-collisions
-  "Count the number of collisions and mean length of collision chains when drawing nrep from dist"
-  [nrep dist]
-  (loop [i 0, ncacc (), mlaacc (), mlcacc ()] ; num collision, mean chain length (all), mean chain length (collisions)
-;    (println i)
-    (if (>= i 100)                      ; num of statistical samples
-      (println (str "| " nrep " | " (incanter.stats/mean ncacc) " | " (incanter.stats/mean mlaacc) " | " (incanter.stats/mean mlcacc) " |"))
-      (let [vs (vals (frequencies (repeatedly nrep #(draw dist))))
-            cs (remove #(= 1 %) vs)]
-        (recur (+ i 1)
-               (cons (reduce + cs) ncacc)
-               (cons (incanter.stats/mean vs) mlaacc)
-               (cons (incanter.stats/mean cs) mlcacc))))))
-
-(defn count-collisions-dist
-  "Count the number of collisions, and store the distributions of collision chain lengths when drawing nrep from dist"
-  [nrep dist]
-  (loop [i 0, ncacc (), mlaacc {}] ; num collision, mean chain length (all), mean chain length (collisions)
-                                        ;    (println i)
-    (if (>= i 100)                      ; num of statistical samples
-      (let [ma (format "%.2f"
-                       (float (/ (reduce + (map #(* (key %) (/ (val %) 100)) mlaacc))
-                                 (reduce + (map #(key %) mlaacc)))))
-            x (dissoc mlaacc 1)
-            mc (format "%.2f"
-                       (float (/ (reduce + (map #(* (key %) (/ (val %) 100)) x))
-                                 (reduce + (map #(key %) x)))))]
-        (println
-         (str "| " nrep " | " (incanter.stats/mean ncacc) " | "
-              ma " | " mc
-              (reduce str
-                      (map #(str " | "(key %) " | " (format "%.2f" (val %)))
-                           (reduce merge
-                                   (map #(hash-map (key %)
-                                                   (float (/ (val %) 100)))
-                                        mlaacc))))
-              " |")))
-      (let [x (frequencies (repeatedly nrep #(draw dist)))
-            vs (frequencies (vals x))
-            cs (dissoc vs 1)]
-        (recur (+ i 1)
-               (cons (reduce + (map #(* (key %) (val %)) cs)) ncacc)
-               (merge-with + vs mlaacc))))))\n;; line 1
-;; line 2
-;; line 1
