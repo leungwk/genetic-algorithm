@@ -287,24 +287,7 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
 
           timestamp (.format (new java.text.SimpleDateFormat "yyyy-MM-dd'T'hhmmss'.'SSS") (new java.util.Date))
           fpath (str "log/q11_ga_" timestamp ".log")]
-      (println (str "(plot-ga \"" fpath "\")"))
-
-      ;; todo: fix (make 2nd expr work)
-      ;; (clojure.contrib.duck-streams/append-spit
-      ;;  fpath
-      ;;  (str "gen" ","
-      ;;       "avgfit" ","
-      ;;       "diversity" ","
-      ;;       "best"
-      ;;       "\n"))
-      ;;
-      ;; (with-open [wtr (clojure.java.io/writer fpath :append true)]
-      ;;   (.write (str "gen" ","
-      ;;                "avgfit" ","
-      ;;                "diversity" ","
-      ;;                "best"
-      ;;                "\n")))
-
+      ;(println (str "(plot-ga \"" fpath "\")"))
 
       (loop [pop ipop, i 1, chro ichro, best ()]
         (if (> i numgen)
@@ -341,22 +324,6 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
                             (recur (- i 1) (cons (mf chro) acc)))))
                 newpop (concat spawn elites-wf)]
 
-            ;; todo: fix (make 2nd expr work)
-            ;; (clojure.contrib.duck-streams/append-spit
-            ;;  fpath
-            ;;  (str i ","
-            ;;       (incanter.stats/mean (map #(:fitness %)
-            ;;                                 (map assoc-fitness newpop))) ","
-            ;;       diversity ","
-            ;;       (:fitness (first wbest-wf)) "\n"))
-            ;;
-            ;; (with-open [wtr (clojure.java.io/writer fpath :append true)]
-            ;;   (.write (str i ","
-            ;;       (incanter.stats/mean (map #(:fitness %)
-            ;;                                 (map assoc-fitness newpop))) ","
-            ;;       diversity ","
-            ;;       (:fitness (first wbest-wf)) "\n")))
-
             (println i)
 
             (recur (if (<= (count newpop) nparents) ; restart if newpop too low
@@ -366,51 +333,6 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
                    (+ i 1)
                    chro
                    wbest-wf)))))))
-
-;; (defn plot-ga
-;;   [fname]
-;;   (with-data (read-dataset fname :header true)
-;;     (doto (incanter.charts/line-chart :gen :avgfit :x-label "gen" :y-label "avgfit")
-;;       view
-;;       incanter.charts/clear-background)
-;;     (doto (incanter.charts/line-chart :gen :diversity :x-label "gen" :y-label "diversity")
-;;       view
-;;       incanter.charts/clear-background)
-;;     (doto (incanter.charts/line-chart :gen :best :x-label "gen" :y-label "best")
-;;       view
-;;       incanter.charts/clear-background)))
-
-;; (defstruct chro-grid :dir :orig)
-;; (defn ga-unimodal []
-;;   (let [[nrow ncol] (dim *unimodal-grid*)
-;;         ichro (struct-map chro-grid
-;;                 :dir [(reduce merge (map #(hash-map % 1) *dirs*))]
-;;                 :orig [(reduce merge (map #(hash-map % 1)
-;;                                           (range nrow)))
-;;                        (reduce merge (map #(hash-map % 1)
-;;                                           (range ncol)))])
-;;         mchro (struct-map chro-grid
-;;                 :dir [[*dirs* 0.25]] ; use p = 1 for mp to control completely
-;;                 :orig [[(range nrow) 0.25]
-;;                        [(range ncol) 0.25]])]
-;;     (ga :numgen 100
-;;         :mp 0.001
-;;         :cp 0.5
-;;         :nipop 30
-;;         :nbest 5
-;;         :nrep 10
-;; ;        :nchilds 5
-;;         :ichro ichro
-;;         :mchro mchro
-;;         :ff (fn grid-product-2 [map]
-;;               (reduce * (conseq-values 4
-;;                                        (first (:dir map)) ; since expecting a list
-;;                                        (:orig map) *unimodal-grid*)))
-;;         :df nil
-;;         :srf select-reproducers-3
-;;         :bsf >
-;;         :mf mutate-2
-;;         :cf one-point-crossover)))
 
 (defstruct chro-rastrigin :bits-x1 :bits-x2)
 (defn ga-rastrigin []
@@ -468,4 +390,5 @@ src: http://en.wikipedia.org/wiki/Tournament_selection"
 (fn paraboloid [{x1 :x1, x2 :x2}]
               (+ (* x1 x1)
                  (* x2 x2)))
+
 )
